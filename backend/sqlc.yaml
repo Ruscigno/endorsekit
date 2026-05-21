@@ -1,0 +1,27 @@
+version: "2"
+sql:
+  - engine: postgresql
+    queries: internal/db/queries
+    schema: ../db/migrations
+    gen:
+      go:
+        package: db
+        out: internal/db
+        sql_package: pgx/v5
+        emit_interface: false
+        emit_json_tags: true
+        emit_db_tags: false
+        emit_prepared_queries: false
+        emit_exact_table_names: false
+        emit_empty_slices: true
+        emit_pointers_for_null_types: true
+        json_tags_case_style: snake
+        overrides:
+          # CITEXT → string (sqlc defaults to []byte without an override).
+          - db_type: "citext"
+            go_type: "string"
+        # NOTE: column-level overrides (e.g. NUMERIC → a decimal type for
+        # invoice money fields) are added here once the schema lands in
+        # Phase 5. Invoice line-item amounts are money — they must NOT be
+        # float64; use integer minor units (cents) or a decimal type. The
+        # endorsement registry works in dates, text, and hashes.

@@ -1,0 +1,12 @@
+# db/seeds — reference seed data + dev fixtures.
+#
+# EndorseKit's one substantial seed asset is the AC 61-65 endorsement
+# template catalog: the canonical list of instructor endorsements
+# (solo, solo cross-country, knowledge test, practical test, flight
+# review, IPC, etc.), each with its AC 61-65 paragraph reference, its
+# regulatory citation, and a parameterized text template. This catalog
+# is transcribed once from the current AC 61-65 revision and checked in
+# here as YAML, then loaded by the Phase 5 seed loader. See
+# docs/product-research.md §4.4.
+#
+# This file is a placeholder so the empty directory is tracked by git.

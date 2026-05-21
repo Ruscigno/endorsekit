@@ -1,0 +1,31 @@
+# backend/go.mod placeholder
+#
+# This file is a PLACEHOLDER. No Go module is initialized yet — the Go
+# service is scaffolded as empty skeleton directories in Phase 0 and
+# implemented starting in Phase 5 / M2. See docs/04-plan.md.
+#
+# When implementation begins, the first backend ticket runs:
+#
+#   cd backend
+#   go mod init github.com/Ruscigno/endorsekit/backend
+#   go get github.com/jackc/pgx/v5
+#   go get github.com/golang-jwt/jwt/v5
+#   go get github.com/MicahParks/keyfunc/v3        # JWKS for Supabase JWT verify
+#   go get github.com/google/uuid
+#   go get github.com/stripe/stripe-go/v79         # Stripe Checkout + Connect
+#   go get github.com/aws/aws-sdk-go-v2            # R2 (S3-compatible) presigned URLs
+#   # PDF generation for endorsements + invoices — pick a PURE-GO library
+#   # so the distroless/static image stays valid (no cgo, no headless
+#   # Chromium). Candidates evaluated in docs/adr/0003-endorsement-pdf-and-esignature.md
+#   # (e.g. github.com/go-pdf/fpdf or a maintained successor). The final
+#   # choice is recorded in that ADR before the dependency is added.
+#
+# Conventions (mirroring tail-number-radar, per docs/adr/0001):
+#   - Go 1.25+, `toolchain` pinned so govulncheck's stdlib check stays current.
+#   - Routing:   stdlib net/http.ServeMux (Go 1.22+ enhanced patterns). No chi/gin.
+#   - DB:        pgx/v5 + sqlc-generated queries. No GORM, no database/sql.
+#   - Migrations: golang-migrate, shared db/migrations/ with the web tier.
+#   - Logging:   slog, structured JSON.
+#   - Module path: github.com/Ruscigno/endorsekit/backend
+#
+# Delete this placeholder when the real go.mod lands.

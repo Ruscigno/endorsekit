@@ -1,0 +1,44 @@
+# Keep build context lean; never ship local state or secrets in image layers.
+# Both web/ and backend/ have their own Dockerfile; this root .dockerignore
+# applies when a build context includes the repo root.
+.git
+.github
+.woodpecker
+.vscode
+.idea
+
+# Secrets — gitignored but defense-in-depth
+.env
+.env.*
+
+# Web build artifacts (rebuilt inside the image)
+web/.svelte-kit
+web/.vite
+web/build
+web/dist
+web/node_modules
+web/coverage
+web/test-results
+web/playwright-report
+
+# Backend build artifacts (rebuilt inside the image)
+backend/tmp
+backend/bin
+backend/dist
+backend/server
+backend/coverage.out
+
+# Docs / journal (no runtime value)
+docs
+journal
+prompts
+
+# Claude scaffolding
+.claude
+
+# CI / tooling
+Makefile
+scripts
+.pre-commit-config.yaml
+.gitleaks.toml
+.editorconfig

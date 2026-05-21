@@ -1,0 +1,63 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+service-account*.json
+gcloud-key*.json
+
+# Node — top-level caches from pre-commit prettier; web/ tree below for the app
+node_modules/
+
+# Web (SvelteKit)
+web/.svelte-kit/
+web/.vite/
+web/build/
+web/dist/
+web/node_modules/
+web/coverage/
+web/.vercel/
+web/.next/
+web/test-results/
+web/playwright-report/
+web/playwright/.cache/
+web/*.tsbuildinfo
+
+# Backend (Go)
+backend/tmp/
+backend/bin/
+backend/dist/
+backend/server
+backend/*.test
+backend/coverage.out
+
+# DB
+db/dump/
+*.sqlite
+*.sqlite-journal
+
+# Tooling
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+pnpm-debug.log*
+
+# Sentry
+.sentryclirc
+
+# Local Claude state (allow shared config, ignore per-user state)
+.claude/local/
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

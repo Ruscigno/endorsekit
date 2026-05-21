@@ -1,0 +1,163 @@
+# Deploy pipeline — runs only on push to main, per-component.
+#
+# EndorseKit is two Cloud Run services: endorsekit-web (SvelteKit) and
+# endorsekit-api (Go). Both deploy from one Woodpecker pipeline with
+# path-gated steps — Woodpecker's local backend runs parallel jobs on the
+# same host, so consolidation simplifies the .env / secret surface.
+#
+# The migration step runs BEFORE either deploy so the DB is always at
+# least as new as the code that talks to it.
+
+when:
+  - event: push
+    branch: main
+
+# Skip auto-clone; do it manually as the first step — see .woodpecker/pr.yml
+# for the full rationale (Woodpecker ignores `image:` on the `clone:` block).
+skip_clone: true
+
+steps:
+  - name: clone
+    image: bash
+    commands:
+      - rm -rf ./* ./.git 2>/dev/null || true
+      - git init -q
+      - 'git remote add origin "$CI_REPO_CLONE_SSH_URL"'
+      - 'git fetch --depth=50 origin "$CI_COMMIT_SHA"'
+      - git checkout -q FETCH_HEAD
+
+  # ----------------------------------------------------------------------
+  # Apply migrations to the production Supabase Postgres
+  # ----------------------------------------------------------------------
+  - name: db-migrate-preflight
+    image: bash
+    when:
+      - path: ['db/migrations/**']
+    commands:
+      - n=$(find db/migrations -type f -name '*.sql' 2>/dev/null | wc -l | tr -d ' ')
+      - 'if [ "$n" -eq 0 ]; then echo "no migrations — skipping" && exit 78; fi'   # 78 = soft-fail in woodpecker
+
+  - name: db-migrate
+    image: bash
+    when:
+      - path: ['db/migrations/**']
+    environment:
+      SUPABASE_DB_URL:
+        from_secret: SUPABASE_DB_URL
+    commands:
+      - migrate -path db/migrations -database "$SUPABASE_DB_URL" up
+      # sqlc diff asserts the production schema still matches the Go queries.
+      - 'test -f backend/sqlc.yaml && (cd backend && sqlc diff) || echo "no backend yet"'
+
+  # ----------------------------------------------------------------------
+  # Backend (Go) → Cloud Run blue/green
+  # ----------------------------------------------------------------------
+  - name: backend-preflight
+    image: bash
+    when:
+      - path: ['backend/**']
+    commands:
+      - 'test -f backend/go.mod || (echo "no backend/go.mod — skipping" && exit 78)'
+      - 'test -f backend/Dockerfile || (echo "no backend/Dockerfile — skipping" && exit 78)'
+
+  # gcloud is authenticated on the host via `gcloud auth login`; the agent
+  # mounts ~/.config/gcloud. GCP project + service-account come from secrets.
+  - name: backend-build-and-deploy
+    image: bash
+    when:
+      - path: ['backend/**']
+    environment:
+      GCP_PROJECT_ID:
+        from_secret: GCP_PROJECT_ID
+      CLOUD_RUN_SERVICE_ACCOUNT:
+        from_secret: CLOUD_RUN_SERVICE_ACCOUNT
+    commands:
+      - gcloud config set project "$GCP_PROJECT_ID"
+      # 1. Build the container.
+      - >-
+        gcloud builds submit backend
+        --tag "us-central1-docker.pkg.dev/$GCP_PROJECT_ID/endorsekit/api:$CI_COMMIT_SHA"
+      # 2. Deploy --no-traffic so the new revision is tagged but not serving.
+      #    --no-allow-unauthenticated: the Go API is not directly public;
+      #    the web tier proxies, the cron is OIDC-authed, and the public
+      #    booking + endorsement-PDF + Stripe-webhook paths verify their
+      #    own signed tokens / signatures inside the handler.
+      - >-
+        gcloud run deploy endorsekit-api
+        --image "us-central1-docker.pkg.dev/$GCP_PROJECT_ID/endorsekit/api:$CI_COMMIT_SHA"
+        --region us-central1
+        --platform managed
+        --service-account "$CLOUD_RUN_SERVICE_ACCOUNT"
+        --no-allow-unauthenticated
+        --no-traffic
+        --tag "rev-$CI_COMMIT_SHA"
+        --min-instances=0 --max-instances=10
+        --memory=512Mi --cpu=1
+        --update-secrets "DATABASE_URL=supabase-db-url:latest,SUPABASE_JWT_JWKS_URL=supabase-jwks-url:latest,SUPABASE_JWT_AUDIENCE=supabase-jwt-audience:latest,STRIPE_SECRET_KEY=stripe-secret:latest,STRIPE_WEBHOOK_SECRET=stripe-webhook-secret:latest,STRIPE_CONNECT_WEBHOOK_SECRET=stripe-connect-webhook-secret:latest,STRIPE_CONNECT_CLIENT_ID=stripe-connect-client-id:latest,RESEND_API_KEY=resend-key:latest,R2_SECRET_ACCESS_KEY=r2-secret:latest,URL_SIGNING_SECRET=url-signing-secret:latest,ENDORSEMENT_SEAL_SECRET=endorsement-seal-secret:latest"
+      # 3. Smoke-test the tagged URL (still no traffic).
+      - tag="rev-$CI_COMMIT_SHA"
+      - 'url=$(gcloud run services describe endorsekit-api --region us-central1 --format="value(status.traffic[?tag==''$tag''].url)" | head -n1)'
+      - 'test -n "$url" || (echo "tagged URL for $tag not found"; exit 1)'
+      # `$${url}` escapes so bash, not Woodpecker, expands the shell variable.
+      - 'code=$(curl -sS -o /dev/null -w "%{http_code}" "$${url}/healthz")'
+      - 'test "$code" = "200" || (echo "expected 200, got $code"; exit 1)'
+      # 4. Promote to 100% traffic.
+      - >-
+        gcloud run services update-traffic endorsekit-api
+        --region us-central1
+        --to-revisions "rev-$CI_COMMIT_SHA=100"
+
+  # ----------------------------------------------------------------------
+  # Frontend (SvelteKit) → Cloud Run blue/green
+  # ----------------------------------------------------------------------
+  - name: web-preflight
+    image: bash
+    when:
+      - path: ['web/**']
+    commands:
+      - 'test -f web/package.json || (echo "no web/package.json — skipping" && exit 78)'
+      - 'test -f web/Dockerfile || (echo "no web/Dockerfile — skipping" && exit 78)'
+
+  - name: web-build-and-deploy
+    image: bash
+    when:
+      - path: ['web/**']
+    environment:
+      GCP_PROJECT_ID:
+        from_secret: GCP_PROJECT_ID
+    commands:
+      - gcloud config set project "$GCP_PROJECT_ID"
+      - >-
+        gcloud builds submit web
+        --tag "us-central1-docker.pkg.dev/$GCP_PROJECT_ID/endorsekit/web:$CI_COMMIT_SHA"
+      - >-
+        gcloud run deploy endorsekit-web
+        --image "us-central1-docker.pkg.dev/$GCP_PROJECT_ID/endorsekit/web:$CI_COMMIT_SHA"
+        --region us-central1
+        --platform managed
+        --allow-unauthenticated
+        --min-instances=0 --max-instances=10
+        --memory=256Mi --cpu=1 --concurrency=80
+        --update-secrets "SUPABASE_SERVICE_ROLE_KEY=supabase-service-role:latest,STRIPE_SECRET_KEY=stripe-secret:latest,R2_SECRET_ACCESS_KEY=r2-secret:latest"
+
+  - name: web-sentry-release
+    image: bash
+    when:
+      - path: ['web/**']
+    environment:
+      SENTRY_AUTH_TOKEN:
+        from_secret: SENTRY_AUTH_TOKEN
+      SENTRY_ORG:
+        from_secret: SENTRY_ORG
+      SENTRY_PROJECT:
+        from_secret: SENTRY_PROJECT
+    commands:
+      # Sentry release tagging is optional — if SENTRY_AUTH_TOKEN isn't
+      # configured as a Woodpecker secret, the interpolation substitutes
+      # empty and we exit 0 with no work done.
+      - 'if [ -z "$SENTRY_AUTH_TOKEN" ]; then echo "Sentry not configured — skipping release tagging"; exit 0; fi'
+      - cd web
+      - 'export SENTRY_ORG="$SENTRY_ORG" SENTRY_PROJECT="$SENTRY_PROJECT" SENTRY_AUTH_TOKEN="$SENTRY_AUTH_TOKEN"'
+      - 'npx @sentry/cli releases new "$CI_COMMIT_SHA"'
+      - 'npx @sentry/cli releases set-commits "$CI_COMMIT_SHA" --auto'
+      - 'npx @sentry/cli releases finalize "$CI_COMMIT_SHA"'

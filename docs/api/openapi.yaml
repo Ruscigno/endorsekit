@@ -1,0 +1,861 @@
+openapi: 3.1.0
+
+# EndorseKit API contract — DRAFT, awaiting founder review.
+#
+# This describes the Go backend service (`endorsekit-api`). The
+# SvelteKit web tier proxies authenticated calls to it (per
+# docs/02-architecture.md Q2). Simple CFI-owned CRUD that does not need
+# the backend may also go browser-direct via PostgREST + RLS and is not
+# enumerated here.
+#
+# Cross-references: docs/03-spec.md §4 (narrative contract),
+# docs/02-architecture.md (system shape).
+
+info:
+  title: EndorseKit API
+  version: 0.1.0-draft
+  description: >
+    The EndorseKit backend — endorsement issuance and the append-only
+    registry, endorsement/invoice PDF rendering, the booking/lesson
+    reminder cron, Stripe Checkout (the CFI's own subscription) and
+    Stripe Connect (the CFI invoicing students), and the Stripe/Resend
+    webhook receivers. EndorseKit is recordkeeping software for flight
+    instructors; the certificated flight instructor remains solely
+    responsible for the correctness, applicability, and currency of
+    every endorsement issued under 14 CFR Part 61 and AC 61-65, and for
+    retaining the records the regulations require.
+  contact:
+    email: tickerbeats@gmail.com
+
+servers:
+  - url: http://localhost:8080
+    description: Local dev (air live-reload)
+  - url: https://api.endorsekit.example
+    description: Production (Cloud Run us-central1) — hostname set by F-01
+
+tags:
+  - name: health
+  - name: lesson-types
+  - name: availability
+  - name: students
+  - name: bookings
+  - name: endorsements
+  - name: invoicing
+  - name: billing
+  - name: public
+  - name: webhooks
+  - name: cron
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      security: []
+      responses:
+        "200":
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  db: { type: string, example: ok }
+
+  /me/lesson-types:
+    get:
+      tags: [lesson-types]
+      summary: List the CFI's lesson types
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Lesson types
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/LessonType" }
+    post:
+      tags: [lesson-types]
+      summary: Create a lesson type
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LessonTypeInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LessonType" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+
+  /me/availability:
+    get:
+      tags: [availability]
+      summary: Read the CFI's booking availability
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Availability rules
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Availability" }
+    put:
+      tags: [availability]
+      summary: Set the CFI's booking availability
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Availability" }
+      responses:
+        "200": { description: Updated }
+        "400": { $ref: "#/components/responses/ValidationError" }
+
+  /me/students:
+    get:
+      tags: [students]
+      summary: List the CFI's student roster
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Students
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Student" }
+    post:
+      tags: [students]
+      summary: Add a student to the roster
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StudentInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Student" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+
+  /me/students/{id}/acs-progress:
+    patch:
+      tags: [students]
+      summary: Update a student's ACS-progress checklist
+      description: >
+        Upserts a coarse status for one ACS area. This is the CFI's
+        lightweight roster view — NOT a student training journal.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AcsProgressInput" }
+      responses:
+        "200": { description: Updated }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /me/bookings:
+    get:
+      tags: [bookings]
+      summary: List the CFI's bookings
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Bookings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Booking" }
+
+  /me/bookings/{id}:
+    patch:
+      tags: [bookings]
+      summary: Confirm / cancel / complete a booking
+      description: >
+        On completion the CFI may record Hobbs/Tach in and out.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookingUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Booking" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /me/endorsement-templates:
+    get:
+      tags: [endorsements]
+      summary: The AC 61-65 endorsement-template catalog
+      description: >
+        Reference data — the FAA's published endorsement templates. Each
+        template carries its AC 61-65 paragraph reference, the 14 CFR
+        citation, and the AC 61-65 revision it was transcribed from.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/EndorsementTemplate" }
+
+  /me/endorsements:
+    get:
+      tags: [endorsements]
+      summary: Search the endorsement registry
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: student_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: template_id
+          in: query
+          schema: { type: string }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Matching endorsement records (includes superseded rows)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Endorsement" }
+    post:
+      tags: [endorsements]
+      summary: Issue an endorsement
+      description: >
+        Renders the AC 61-65 template with autofilled fields, captures
+        the CFI's typed-name + intent affirmation, computes the HMAC
+        content hash chained to the prior record, INSERTs the immutable
+        registry row, renders the endorsement PDF to R2, and emails the
+        student a signed download link. The registry is append-only —
+        this endpoint only ever INSERTs (ADR-0002).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EndorsementIssueInput" }
+      responses:
+        "201":
+          description: Issued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Endorsement" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "403": { $ref: "#/components/responses/DisclaimerRequired" }
+
+  /me/endorsements/{id}/resend:
+    post:
+      tags: [endorsements]
+      summary: Re-send an issued endorsement PDF to the student
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "202": { description: Re-delivery queued }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /me/endorsements/export:
+    get:
+      tags: [endorsements]
+      summary: Export the full endorsement registry
+      description: >
+        Renders the CFI's complete registry (every row, including
+        superseded ones) to a PDF/CSV archive in R2 — the durable legal
+        copy of record — and returns a short-lived signed download URL.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: A signed export URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string, format: uri }
+                  expires_at: { type: string, format: date-time }
+
+  /me/registry/verify:
+    get:
+      tags: [endorsements]
+      summary: Verify the endorsement registry's hash-chain integrity
+      description: >
+        Walks the CFI's endorsement records, recomputes each content
+        hash from the row + the prior record's hash, and reports whether
+        the chain is intact. A break indicates a tampered historical row.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  intact: { type: boolean }
+                  records_checked: { type: integer }
+                  first_break_endorsement_id:
+                    type: string
+                    format: uuid
+                    nullable: true
+
+  /me/connect/onboard:
+    post:
+      tags: [invoicing]
+      summary: Start / resume Stripe Connect onboarding
+      description: >
+        Creates (or fetches) the CFI's Standard connected account and
+        returns a Stripe-hosted account-link URL. The CFI must complete
+        onboarding before they can send an invoice.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: An onboarding URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  onboarding_url: { type: string, format: uri }
+
+  /me/invoices:
+    get:
+      tags: [invoicing]
+      summary: List the CFI's invoices
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Invoices
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Invoice" }
+    post:
+      tags: [invoicing]
+      summary: Create + send a student invoice
+      description: >
+        Creates a Stripe invoice ON THE CFI'S CONNECTED ACCOUNT (never
+        the platform account) with aviation line items. Requires the
+        connected account's charges_enabled capability. No
+        application_fee is applied (ADR-0005).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InvoiceInput" }
+      responses:
+        "201":
+          description: Created + sent
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Invoice" }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "409":
+          description: The CFI's connected account is not yet onboarded (charges_enabled is false)
+
+  /me/billing/checkout:
+    post:
+      tags: [billing]
+      summary: Create a Stripe Checkout Session for the CFI's subscription
+      description: >
+        Creates a Checkout Session ON THE PLATFORM ACCOUNT for the CFI's
+        own EndorseKit subscription ($12/mo or $120/yr).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                plan: { type: string, enum: [monthly, annual] }
+              required: [plan]
+      responses:
+        "200":
+          description: A Checkout Session URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string, format: uri }
+
+  /me/billing/portal:
+    post:
+      tags: [billing]
+      summary: Create a Stripe Customer Portal session
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: A Customer Portal URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string, format: uri }
+
+  /book/{cfiSlug}:
+    get:
+      tags: [public]
+      summary: Public booking-page data for a CFI
+      description: >
+        Unauthenticated. Returns ONLY the CFI's public booking profile —
+        display name, lesson types, and open slots. Never the CFI's
+        students, endorsements, invoices, or contact list.
+      security: []
+      parameters:
+        - name: cfiSlug
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The public booking page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicBookingPage" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [public]
+      summary: Submit a booking request
+      description: >
+        Unauthenticated, rate-limited. Every field is validated
+        server-side as hostile input. Creates a `booking` row in
+        `requested` status scoped to that CFI.
+      security: []
+      parameters:
+        - name: cfiSlug
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BookingRequest" }
+      responses:
+        "201": { description: Booking request created }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /endorsement/{token}:
+    get:
+      tags: [public]
+      summary: Download an issued endorsement PDF
+      description: >
+        Unauthenticated, rate-limited. The HMAC-signed token resolves to
+        EXACTLY ONE endorsement record — it cannot pivot to the registry
+        or to any other record. Redirects to / streams that one PDF.
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: The endorsement PDF }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410":
+          description: The download link has expired
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /cron/daily:
+    post:
+      tags: [cron]
+      summary: Daily booking/lesson reminder + re-engagement fan-out
+      description: >
+        Called by Cloud Scheduler with a Google OIDC token. Verifies the
+        token (issuer + audience), scans bookings happening soon and
+        students not flown in N weeks, and per (booking × channel ×
+        window × recipient) attempts a dedupe INSERT into reminder_audit
+        before sending. Idempotent — re-firing the same day is a no-op.
+      security: [{ oidcAuth: [] }]
+      responses:
+        "204": { description: Cron run complete }
+        "401":
+          description: Missing or invalid OIDC token
+
+  /webhooks/stripe:
+    post:
+      tags: [webhooks]
+      summary: Stripe platform-account billing events
+      description: >
+        The CFI's own subscription. Signature verified against the RAW
+        request body with STRIPE_WEBHOOK_SECRET. Idempotency is a DB
+        UNIQUE constraint on (provider, event_id).
+      security: [{ stripeSignature: [] }]
+      responses:
+        "200": { description: Acknowledged }
+        "400":
+          description: Missing or invalid signature
+
+  /webhooks/stripe/connect:
+    post:
+      tags: [webhooks]
+      summary: Stripe connected-account events
+      description: >
+        account.updated / capability.updated / payout.* and
+        connected-account invoice.* events. Signature verified against
+        the RAW body with STRIPE_CONNECT_WEBHOOK_SECRET (a separate
+        secret from the platform endpoint).
+      security: [{ stripeSignature: [] }]
+      responses:
+        "200": { description: Acknowledged }
+        "400":
+          description: Missing or invalid signature
+
+  /webhooks/resend:
+    post:
+      tags: [webhooks]
+      summary: Resend deliverability events (bounce / complaint)
+      security: [{ resendSignature: [] }]
+      responses:
+        "200": { description: Acknowledged }
+        "400":
+          description: Missing or invalid signature
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: A Supabase-issued ES256 JWT for the authenticated CFI.
+    oidcAuth:
+      type: http
+      scheme: bearer
+      description: A Google-issued OIDC token from Cloud Scheduler.
+    stripeSignature:
+      type: apiKey
+      in: header
+      name: Stripe-Signature
+      description: Verified against the raw request body.
+    resendSignature:
+      type: apiKey
+      in: header
+      name: Resend-Signature
+      description: Resend deliverability-webhook HMAC, verified against the raw body.
+
+  responses:
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Not found (no information leak about which resources exist)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: Too many requests
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    DisclaimerRequired:
+      description: The CFI has not acknowledged the current aviation disclaimer
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/Error"
+              - type: object
+                properties:
+                  ack_url: { type: string }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            fields:
+              type: object
+              additionalProperties:
+                type: array
+                items: { type: string }
+      required: [error]
+
+    LessonKind:
+      type: string
+      enum: [ground, flight, sim]
+
+    LessonTypeInput:
+      type: object
+      properties:
+        kind: { $ref: "#/components/schemas/LessonKind" }
+        label: { type: string }
+        duration_min: { type: integer }
+        rate_cents:
+          type: integer
+          description: Money is integer cents — never a floating-point number.
+          nullable: true
+      required: [kind, label, duration_min]
+
+    LessonType:
+      allOf:
+        - $ref: "#/components/schemas/LessonTypeInput"
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            created_at: { type: string, format: date-time }
+
+    Availability:
+      type: object
+      properties:
+        rules:
+          type: object
+          description: Weekly recurring availability rules.
+        updated_at: { type: string, format: date-time }
+
+    StudentInput:
+      type: object
+      properties:
+        full_name: { type: string }
+        email: { type: string, format: email, nullable: true }
+        phone: { type: string, nullable: true }
+        certificate_target:
+          type: string
+          example: private
+          nullable: true
+      required: [full_name]
+
+    Student:
+      allOf:
+        - $ref: "#/components/schemas/StudentInput"
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            training_hours: { type: number, description: Derived from completed bookings }
+            created_at: { type: string, format: date-time }
+
+    AcsProgressInput:
+      type: object
+      properties:
+        acs_area: { type: string }
+        status:
+          type: string
+          enum: [not_started, in_progress, ready]
+      required: [acs_area, status]
+
+    BookingStatus:
+      type: string
+      enum: [requested, confirmed, completed, cancelled, no_show]
+
+    Booking:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        student_id: { type: string, format: uuid, nullable: true }
+        lesson_type_id: { type: string, format: uuid, nullable: true }
+        requested_name: { type: string }
+        requested_email: { type: string, format: email }
+        slot_start: { type: string, format: date-time }
+        slot_end: { type: string, format: date-time }
+        status: { $ref: "#/components/schemas/BookingStatus" }
+        hobbs_out: { type: number, nullable: true }
+        hobbs_in: { type: number, nullable: true }
+        tach_out: { type: number, nullable: true }
+        tach_in: { type: number, nullable: true }
+        notes: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    BookingUpdate:
+      type: object
+      properties:
+        status: { $ref: "#/components/schemas/BookingStatus" }
+        hobbs_out: { type: number, nullable: true }
+        hobbs_in: { type: number, nullable: true }
+        tach_out: { type: number, nullable: true }
+        tach_in: { type: number, nullable: true }
+        notes: { type: string, nullable: true }
+      required: [status]
+
+    BookingRequest:
+      type: object
+      description: A public booking-page submission.
+      properties:
+        name: { type: string }
+        email: { type: string, format: email }
+        lesson_type_id: { type: string, format: uuid }
+        slot_start: { type: string, format: date-time }
+      required: [name, email, lesson_type_id, slot_start]
+
+    PublicBookingPage:
+      type: object
+      description: The PUBLIC, unauthenticated view of a CFI's booking page.
+      properties:
+        cfi_display_name: { type: string }
+        lesson_types:
+          type: array
+          items: { $ref: "#/components/schemas/LessonType" }
+        open_slots:
+          type: array
+          items:
+            type: object
+            properties:
+              start: { type: string, format: date-time }
+              end: { type: string, format: date-time }
+        disclaimer: { type: string }
+
+    EndorsementTemplate:
+      type: object
+      description: An AC 61-65 endorsement template (reference data).
+      properties:
+        id: { type: string, example: ac6165_a65_solo }
+        ac_paragraph: { type: string, example: "AC 61-65J ¶ A.65" }
+        cfr_citation: { type: string, example: "14 CFR 61.87(n)" }
+        title: { type: string, example: "Solo flight (first 90-day period)" }
+        body_template:
+          type: string
+          description: The FAA-published, parameterized endorsement text.
+        ac_revision:
+          type: string
+          description: The AC 61-65 revision this template was transcribed from.
+
+    EndorsementIssueInput:
+      type: object
+      properties:
+        template_id: { type: string }
+        student_id: { type: string, format: uuid }
+        signature:
+          type: object
+          description: >
+            The typed-name + intent affirmation (ADR-0003). The signer
+            identity is derived from the verified JWT — NOT from this
+            body.
+          properties:
+            typed_name: { type: string }
+            affirmation_accepted: { type: boolean }
+          required: [typed_name, affirmation_accepted]
+      required: [template_id, student_id, signature]
+
+    Endorsement:
+      type: object
+      description: >
+        One immutable record in the append-only registry (ADR-0002).
+        Never updated or deleted; corrections are new superseding rows.
+      properties:
+        id: { type: string, format: uuid }
+        template_id: { type: string }
+        student_id: { type: string, format: uuid }
+        cfi_name_snapshot: { type: string }
+        cfi_cert_snapshot: { type: string }
+        student_name_snapshot: { type: string }
+        ac_paragraph: { type: string, example: "AC 61-65J ¶ A.65" }
+        cfr_citation: { type: string, example: "14 CFR 61.87(n)" }
+        rendered_text: { type: string }
+        issued_on: { type: string, format: date }
+        signature_kind: { type: string, example: typed_affirmation }
+        content_hash:
+          type: string
+          description: HMAC over the material fields (the seal).
+        prev_content_hash:
+          type: string
+          nullable: true
+          description: Chains to the prior record; null for the first.
+        seal_algo: { type: string, example: hmac-sha256 }
+        seal_key_version: { type: integer }
+        supersedes_endorsement_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Set when this row corrects (supersedes) a prior one.
+        pdf_url:
+          type: string
+          format: uri
+          nullable: true
+          description: A signed download URL for the rendered PDF.
+        created_at: { type: string, format: date-time }
+
+    InvoiceStatus:
+      type: string
+      enum: [draft, open, paid, void, uncollectible]
+
+    InvoiceLineItemInput:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [ground, flight, sim, materials]
+        description: { type: string }
+        quantity: { type: number }
+        unit_cents:
+          type: integer
+          description: Money is integer cents — never a floating-point number.
+      required: [kind, description, quantity, unit_cents]
+
+    InvoiceInput:
+      type: object
+      properties:
+        student_id: { type: string, format: uuid }
+        booking_id: { type: string, format: uuid, nullable: true }
+        line_items:
+          type: array
+          items: { $ref: "#/components/schemas/InvoiceLineItemInput" }
+      required: [student_id, line_items]
+
+    Invoice:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        student_id: { type: string, format: uuid }
+        booking_id: { type: string, format: uuid, nullable: true }
+        stripe_invoice_id:
+          type: string
+          nullable: true
+          description: The invoice ID ON THE CFI'S CONNECTED ACCOUNT.
+        status: { $ref: "#/components/schemas/InvoiceStatus" }
+        total_cents:
+          type: integer
+          description: Money is integer cents — never a floating-point number.
+        currency: { type: string, example: usd }
+        created_at: { type: string, format: date-time }
+
+security:
+  - bearerAuth: []

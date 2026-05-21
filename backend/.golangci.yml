@@ -1,0 +1,74 @@
+# golangci-lint config — v2 schema.
+#
+# Goal: catch real bugs without becoming a tax on velocity. Mirrors the
+# tail-number-radar sibling repo's config.
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    # Correctness
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    # Style / hygiene
+    - misspell
+    - unconvert
+    - unparam
+    # Security-flavored
+    - gosec
+    - bodyclose
+    - rowserrcheck
+    - sqlclosecheck
+    # Concurrency / error handling
+    - contextcheck
+    - errorlint
+    - nilerr
+    # Style + diagnostics
+    - revive
+    - gocritic
+
+  settings:
+    gosec:
+      # G104 (audit unchecked errors) is covered by errcheck.
+      excludes: [G104]
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    revive:
+      rules:
+        - name: exported
+          disabled: false
+        - name: var-naming
+        - name: package-comments
+        - name: indent-error-flow
+    gocritic:
+      enabled-tags: [diagnostic, performance, style]
+      disabled-checks: [hugeParam, paramTypeCombine]
+
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [errcheck, gosec, unparam]
+      - path: cmd/
+        linters: [gochecknoinits]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -1,0 +1,210 @@
+# PR checks — gating pipeline for every PR + push to main.
+#
+# Runs on the self-hosted Woodpecker server (see iac-tickerbeats) with
+# WOODPECKER_BACKEND=local: each step shells out on the host using the
+# brew-installed toolchain. `pnpm`, `node`, `go`, `golangci-lint`,
+# `gitleaks`, `semgrep`, `docker`, `migrate` live under /opt/homebrew/bin/.
+#
+# Local-backend quirks (mirrored from the sibling repos):
+#   1. skip_clone: true — Woodpecker's implicit auto-clone uses the
+#      plugin-git Docker plugin, which the local backend can't run.
+#      We do the clone ourselves in the first step.
+#   2. image: bash — Woodpecker's YAML schema rejects `local` as a
+#      sentinel; `bash` passes validation and is informational under
+#      the local backend (the step just shells out on the host).
+#   3. $${VAR:-default} — escapes Woodpecker's template engine so the
+#      bash default-value syntax passes through to the shell.
+#
+# Companion: .woodpecker/deploy.yml runs the Cloud Run cutover on push
+# to main (web + backend, path-gated).
+
+when:
+  - event: pull_request
+    branch:
+      - main
+      - 'epic/**'
+      - 'feat/**'
+      - 'chore/**'
+      - 'fix/**'
+  - event: push
+    branch: main
+
+skip_clone: true
+
+steps:
+  # ----------------------------------------------------------------------
+  # Manual clone (replaces the implicit plugin-git step)
+  # ----------------------------------------------------------------------
+  - name: clone
+    image: bash
+    commands:
+      # SSH because the endorsekit repo is private and HTTPS would
+      # prompt for credentials (no TTY). The agent runs as the founder
+      # under launchd, so ~/.ssh/ + macOS Keychain handle auth.
+      - rm -rf ./* ./.git 2>/dev/null || true
+      - git init -q
+      - 'git remote add origin "$CI_REPO_CLONE_SSH_URL"'
+      # Depth 200 is enough for single-author + spec-guard merge-base lookups.
+      - 'git fetch --depth=200 origin "$CI_COMMIT_SHA"'
+      - git checkout -q FETCH_HEAD
+
+  # ----------------------------------------------------------------------
+  # Always-on gates
+  # ----------------------------------------------------------------------
+  - name: secret-scan
+    image: bash
+    commands:
+      # Scan the full git history of this branch (not just the working
+      # tree) so accidentally-committed-then-removed secrets are caught.
+      # The .gitleaks.toml allowlist covers .env.example and docs/.
+      - gitleaks detect --no-banner --redact --source=.
+
+  - name: sast
+    image: bash
+    commands:
+      - >-
+        semgrep ci
+        --config p/owasp-top-ten
+        --config p/security-audit
+        --config p/typescript
+        --config p/javascript
+        --config p/golang
+
+  - name: single-author
+    image: bash
+    when:
+      - event: pull_request
+    commands:
+      # Single-author policy: no Co-Authored-By trailers on PR commits.
+      # See .claude/rules/engineering.md.
+      - 'BASE_REF="$${CI_COMMIT_PULL_REQUEST_BASE_BRANCH:-main}"'
+      - git fetch origin "$BASE_REF" --depth=200 --quiet
+      - base_sha=$(git merge-base "origin/$BASE_REF" HEAD)
+      - bad=0
+      - >-
+        for sha in $(git rev-list "$base_sha"..HEAD); do
+          if git log -1 --format='%B' "$sha" | grep -iqE '^Co-Authored-By:'; then
+            echo "ERROR $(git log -1 --oneline "$sha") has a Co-Authored-By trailer (single-author policy: founder only).";
+            bad=1;
+          fi;
+        done
+      - 'if [ "$bad" -ne 0 ]; then echo "ERROR See .claude/rules/engineering.md — Single author per commit."; exit 1; fi'
+
+  - name: no-pii-in-logs
+    image: bash
+    when:
+      - path: ['web/src/**', 'backend/**']
+    commands:
+      # Enforces AC-X05 (no PII / secrets inside log call sites).
+      - bash scripts/check-no-pii-in-logs.sh
+
+  - name: endorsement-immutability
+    image: bash
+    when:
+      - path: ['db/migrations/**', 'backend/internal/**', 'web/src/**']
+    commands:
+      # Heuristic guard: the endorsement registry is append-only
+      # (14 CFR 61.189 / AC 61-65). Blocks UPDATE/DELETE on the
+      # endorsements table; the endorsement-registry-auditor does the
+      # deeper review. See docs/adr/0002.
+      - bash scripts/check-endorsement-immutability.sh
+
+  - name: spec-guard
+    image: bash
+    commands:
+      # Heuristic: warn (do not block) if the diff introduces keywords
+      # from the research §5.4 cut list or attempts to swap a load-bearing
+      # decision. Real review happens via the spec-guardian subagent.
+      #
+      # NOTE: keep each line a single shell command. YAML `>-` folding
+      # preserves newlines on continuation lines, which bash will reject
+      # when the next character is `|`. Use single-line forms.
+      - 'BASE_REF="$${CI_COMMIT_PULL_REQUEST_BASE_BRANCH:-main}"'
+      - 'forbidden="native ios|native android|capacitor|web push|webpush|part 141|flight school management|fleet scheduling|8710|iacra|next.js|nextjs|gin-gonic|GORM"'
+      - git fetch origin "$BASE_REF" --quiet || true
+      - 'matches=$(git diff "origin/$BASE_REF"...HEAD -- ":(exclude)docs/**" | grep -E "^\+" | grep -Eni "$forbidden" || true)'
+      - 'if [ -n "$matches" ]; then echo "WARNING PR introduces deferred-scope or off-stack keywords. Confirm with spec-guardian."; echo "$matches"; fi'
+
+  # ----------------------------------------------------------------------
+  # Web — Node 20 + pnpm + lint + typecheck + test + build + audit
+  # Gated on web/** so this is a no-op until the SvelteKit scaffold lands
+  # in Phase 5 M1.
+  # ----------------------------------------------------------------------
+  - name: web
+    image: bash
+    when:
+      - path: ['web/**']
+    commands:
+      - cd web
+      - pnpm install --frozen-lockfile
+      - pnpm lint
+      - pnpm check
+      - pnpm test -- --coverage
+      - pnpm build
+      - pnpm audit --audit-level=high
+
+  # ----------------------------------------------------------------------
+  # Backend — Go 1.25 + gofmt + vet + golangci-lint + sqlc drift + test
+  # Gated on backend/** so this is a no-op until the Go scaffold lands
+  # in Phase 5 M2.
+  # ----------------------------------------------------------------------
+  - name: backend
+    image: bash
+    when:
+      - path: ['backend/**', 'db/migrations/**']
+    commands:
+      - cd backend
+      - test -f go.mod || { echo "no backend/go.mod yet — skipping"; exit 0; }
+      - gofmt -l . | tee /tmp/gofmt.out
+      - 'test ! -s /tmp/gofmt.out || { echo "gofmt: files need formatting"; exit 1; }'
+      - go vet ./...
+      - golangci-lint run
+      # sqlc diff catches schema/query drift: queries must match db/migrations.
+      - sqlc diff
+      - go test -race -cover ./...
+      - govulncheck ./...
+
+  # ----------------------------------------------------------------------
+  # DB — golang-migrate up → down-all → up against ephemeral Supabase
+  # Postgres (image ships with the `auth` schema pre-installed, so RLS
+  # policies + the on_auth_user_created trigger compile).
+  # ----------------------------------------------------------------------
+  - name: db-start
+    image: bash
+    when:
+      - path: ['db/migrations/**']
+    environment:
+      # Colima exposes Docker on a per-user socket, not /var/run/docker.sock.
+      DOCKER_HOST: unix:///Users/sander/.colima/default/docker.sock
+    commands:
+      # Bind host port 5436 (sibling repos use 5432/5433/5434/5435).
+      # supabase/postgres ships with the `auth` schema + auth.users table
+      # that the RLS migrations reference.
+      - >-
+        docker run -d --rm --name endorsekit-pg-ci
+        -e POSTGRES_PASSWORD=postgres
+        -e POSTGRES_DB=postgres
+        -p 5436:5432
+        supabase/postgres:15.8.1.060
+      - 'for i in $(seq 1 60); do docker exec endorsekit-pg-ci pg_isready -U postgres >/dev/null 2>&1 && exit 0; sleep 1; done; echo "postgres did not become ready"; docker logs endorsekit-pg-ci; exit 1'
+
+  - name: db-migrate
+    image: bash
+    when:
+      - path: ['db/migrations/**']
+    environment:
+      DB: postgres://postgres:postgres@localhost:5436/postgres?sslmode=disable
+    commands:
+      - migrate -path db/migrations -database "$DB" up
+      - migrate -path db/migrations -database "$DB" down -all
+      - migrate -path db/migrations -database "$DB" up
+
+  - name: db-stop
+    image: bash
+    when:
+      - path: ['db/migrations/**']
+      - status: [success, failure]   # always tear down, even on migrate failure
+    environment:
+      DOCKER_HOST: unix:///Users/sander/.colima/default/docker.sock
+    commands:
+      - docker stop endorsekit-pg-ci || true

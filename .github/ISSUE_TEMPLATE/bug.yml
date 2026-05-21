@@ -1,0 +1,46 @@
+name: Bug report
+description: Something is broken
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Steps to reproduce, observed vs. expected.
+    validations: { required: true }
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - signup / login
+        - booking page (public)
+        - booking / lesson management (CFI)
+        - endorsement issuance (pick reference / sign / send)
+        - endorsement registry (search / export)
+        - student CRM / ACS-progress checklist
+        - lesson / booking reminder email
+        - invoicing / Stripe Connect (CFI gets paid)
+        - subscription billing (CFI's own plan)
+        - endorsement / invoice PDF generation
+        - PWA install / service worker
+        - other
+    validations: { required: true }
+  - type: input
+    id: browser
+    attributes:
+      label: Browser / device
+      description: e.g. "iOS Safari 17", "Chrome 122 Android", "Firefox 123 desktop"
+  - type: textarea
+    id: endorsement-detail
+    attributes:
+      label: If an endorsement issue — which AC 61-65 reference, what was wrong
+      description: >
+        e.g. "AC 61-65J A.65 solo flight; CFI cert expiry autofilled as
+        2025-04-30, should be 2026-04-30". Never paste a student's full
+        name or contact info — use initials. Helps reproduce.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sentry event ID / logs
+      description: Paste a Sentry event link if you have one. Scrub PII (no email addresses, no certificate numbers).

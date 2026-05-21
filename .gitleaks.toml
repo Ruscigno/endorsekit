@@ -1,0 +1,82 @@
+# gitleaks config for EndorseKit.
+# Extends the default ruleset and adds patterns for the providers we use.
+
+title = "EndorseKit gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "stripe-secret-key"
+description = "Stripe secret key (live or test)"
+regex = '''sk_(live|test)_[0-9a-zA-Z]{24,}'''
+keywords = ["sk_live_", "sk_test_"]
+
+[[rules]]
+id = "stripe-webhook-secret"
+description = "Stripe webhook signing secret"
+regex = '''whsec_[0-9a-zA-Z]{32,}'''
+keywords = ["whsec_"]
+
+[[rules]]
+id = "stripe-connect-client-id"
+description = "Stripe Connect OAuth client ID"
+regex = '''ca_[0-9a-zA-Z]{24,}'''
+keywords = ["ca_"]
+
+[[rules]]
+id = "resend-api-key"
+description = "Resend API key"
+# Real Resend keys are `re_` + ~35 base62 chars — no underscores after the
+# prefix. Underscore in body would false-positive on common identifiers.
+regex = '''re_[0-9a-zA-Z]{20,}'''
+keywords = ["re_"]
+
+[[rules]]
+id = "supabase-service-role"
+description = "Supabase service-role JWT (do not commit)"
+regex = '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'''
+keywords = ["service_role", "supabase"]
+
+[[rules]]
+id = "postgres-connection-string"
+description = "Postgres connection string with a real password"
+regex = '''postgres(ql)?://[^:]+:[^@]+@[^/]+'''
+keywords = ["postgres://", "postgresql://"]
+# Go's RE2 engine has no negative lookahead, so exclude the throwaway
+# `postgres:postgres@localhost` / `@127.0.0.1` ephemeral local/CI test
+# DBs via a per-rule allowlist regex. A genuine leak targets a real
+# host with a real password and still trips.
+[rules.allowlist]
+regexes = [
+  '''postgres(ql)?://postgres:postgres@(localhost|127\.0\.0\.1)''',
+]
+
+[[rules]]
+id = "r2-access-key"
+description = "Cloudflare R2 access key (AWS-style key shape)"
+regex = '''AKIA[0-9A-Z]{16}'''
+keywords = ["AKIA"]
+
+[[rules]]
+id = "gcp-service-account-key"
+description = "GCP service account private key"
+regex = '''-----BEGIN PRIVATE KEY-----'''
+keywords = ["BEGIN PRIVATE KEY"]
+
+[[rules]]
+id = "sentry-dsn"
+description = "Sentry DSN with project ID"
+regex = '''https://[a-f0-9]{32,}@[a-z0-9.-]+\.ingest\.sentry\.io/\d+'''
+keywords = ["sentry.io"]
+
+# Allowlist .env.example and the docs since they intentionally hold placeholders.
+[allowlist]
+description = "Test fixtures, example envs, and the source-of-truth docs"
+paths = [
+  '''\.env\.example$''',
+  '''.*_test\.(ts|js|go)$''',
+  '''.*\.test\.(ts|js)$''',
+  '''docs/.*''',
+  '''\.gitleaks\.toml$''',
+]
