@@ -1,3 +1,7 @@
+> **Amendment 2026-05-24 — Shared Mac stack pivot.** Sections below referring to Cloud Run / Cloud Scheduler / Supabase-cloud are SUPERSEDED by [ADR-0006](adr/0006-shared-mac-stack-supersedes.md). When implementation begins, EndorseKit will run on the shared Mac stack ([portfolio architecture](https://github.com/Ruscigno/iac-tickerbeats/blob/main/docs/portfolio-architecture.md)) — assigned subdomain `enk.tickerbeats.com` (frontend) + `enk-api.tickerbeats.com` (backend). R2 + Stripe (platform + Connect) + Resend + the append-only endorsement registry are unchanged. The research below is preserved verbatim as the original source of truth.
+
+---
+
 # EndorseKit — MVP V1 Development Plan & Architecture Blueprint
 
 This document is the end-to-end build plan for a solo developer to ship

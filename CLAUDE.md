@@ -42,6 +42,8 @@ EndorseKit is **two deployables on Cloud Run (us-central1, scale-to-zero)**: a S
 
 ## Load-bearing decisions (do not re-litigate without cause)
 
+> **2026-05-24 — Shared Mac stack pivot ([ADR-0006](docs/adr/0006-shared-mac-stack-supersedes.md))** supersedes the cloud-hosting bullets below (Cloud Run us-central1 + Cloud Scheduler + single-vendor Supabase cloud — kept verbatim as historical record). When implementation begins, `enk.tickerbeats.com` (web) + `enk-api.tickerbeats.com` (backend) will run on the Mac via Cloudflare Tunnel against shared Postgres + shared GoTrue from [iac-tickerbeats](https://github.com/Ruscigno/iac-tickerbeats); the daily cron transport flips to a Mac launchd plist + shared `X-Cron-Secret`; see [portfolio architecture](https://github.com/Ruscigno/iac-tickerbeats/blob/main/docs/portfolio-architecture.md). The append-only endorsement registry + HMAC seal chain + R2 registry-export archive + Stripe (platform + Connect) + Resend are unchanged.
+
 These were chosen deliberately in [docs/product-research.md](docs/product-research.md). Each has reasoning in the cited section — read it before proposing a swap.
 
 - **SvelteKit (Svelte 5) + Tailwind + Vite-PWA** for the web tier, not Next.js. Bundle size and TTI dominate — the CFI uses it one-handed on a phone, and the public booking page is customer-facing (research §2.3).
