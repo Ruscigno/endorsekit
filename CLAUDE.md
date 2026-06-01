@@ -8,6 +8,19 @@ The source of truth for scope, architecture, and sequencing is [docs/product-res
 
 The repo is pre-implementation. This commit lands the Phase 0 scaffold (rules, subagents, CI, founder-action track, ADR template, Go-backend skeleton) **alongside draft Phase 1–4 artifacts** in `docs/`. **No founder approval is recorded for any phase** — `docs/01-discovery.md` through `docs/04-plan.md` and ADRs `0001`–`0005` are review drafts. Phase 1 (Discovery) is re-run / finalized via [prompts/01-discovery-kickoff.md](prompts/01-discovery-kickoff.md).
 
+## Aviation Cortex platform integration
+
+This gear ships as part of the Aviation Cortex portfolio. The platform contract that governs the gear's public surface is documented in [iac-tickerbeats ADR-0006](https://github.com/Ruscigno/iac-tickerbeats/blob/main/docs/adr/0006-path-routing-and-web-component-shell.md) and the master [landing-pages brief](https://github.com/Ruscigno/aviation-cortex/blob/main/docs/landing-pages-brief.md). Forward-looking guarantees gear code must respect:
+
+- **Public URL**: `aviationcortex.com/endorsekit/*` (path-based; this gear's slug is `endorsekit`, abbreviated `edk` in dense contexts). Routed via Cloudflared ingress to a local SvelteKit process on port `3014`.
+- **Subscription**: covered by the single Cortex bundle subscription ($19/mo monthly, $108/yr founder's annual for the first 100 annual subscribers, $182/yr standard after the cap — landing-pages brief §7). No per-gear pricing. Paywall reads `cortex.users.access_until` from shared Postgres.
+- **Auth**: shared GoTrue at `auth.aviationcortex.com` (HS256). Single first-party cookie on `aviationcortex.com`, no wildcard.
+- **Shared chrome**: header, footer, gear switcher, locale switcher, account menu, `part of Cortex` badge, and loading skeleton are rendered by the Web Component shell `<aviation-cortex-shell>` loaded from `aviationcortex.com/assets/shell.js`. The gear does NOT re-implement any of those.
+- **Locale propagation** (landing-pages brief §28.X): locale is shell-owned. Read from the `<aviation-cortex-shell>` reflected attribute + `cortex:locale-changed` event. Propagate internally via SvelteKit `setContext('locale', ...)`. Gear code does NOT parse URL/cookie or call `navigator.language`, and does NOT render its own locale switcher.
+- **Breadcrumb**: anchors at the gear's 3-letter abbreviation (`edk`) per landing-pages brief §4.7.4.
+
+This block is forward-looking — architectural statements elsewhere in this file that conflict with the platform contract (e.g., older Cloud Run / Supabase-managed Postgres / per-product subscription wording) are out of scope for the PR that landed this section. They will be reconciled separately when this gear's frontend is brought under the Cortex umbrella.
+
 ## How work proceeds
 
 We work in named phases, each ending with a reviewable artifact. **Phase-artifact gates are stop-and-confirm — never auto-advance.** Per-ticket implementation work inside a milestone does NOT require per-PR founder approval; see [Working contract (cadence)](#working-contract-cadence) below. See [.claude/rules/engineering.md](.claude/rules/engineering.md#phase-gates) for the full SDLC.
