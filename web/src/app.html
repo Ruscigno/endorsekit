@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="%cortex.locale%">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>endorsekit — Aviation Cortex</title>
+
+    <!--
+      Aviation Cortex platform contract (implementation_plan.md §10.1).
+      All three URLs resolve same-origin once Cloudflared routes
+      aviationcortex.com/* through the platform.
+    -->
+    <link rel="stylesheet" href="/assets/theme.css" />
+    <link rel="stylesheet" href="/assets/shell-skeleton.css" />
+    <script src="/assets/shell.js" defer></script>
+
+    %sveltekit.head%
+  </head>
+  <body>
+    <aviation-cortex-shell locale="%cortex.locale%" active-product="endorsekit">
+      <div slot="content">%sveltekit.body%</div>
+    </aviation-cortex-shell>
+  </body>
+</html>
