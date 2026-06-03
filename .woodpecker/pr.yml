@@ -76,19 +76,16 @@ steps:
       - event: pull_request
     commands:
       # Single-author policy: no Co-Authored-By trailers on PR commits.
+      # Tip-only check — the local Woodpecker backend's shallow clone makes
+      # a base-ref fetch + `git merge-base` walk exit 128, so we inspect the
+      # PR tip commit directly (mirrors currency-hub / sibling repos).
       # See .claude/rules/engineering.md.
-      - 'BASE_REF="$${CI_COMMIT_PULL_REQUEST_BASE_BRANCH:-main}"'
-      - git fetch origin "$BASE_REF" --depth=200 --quiet
-      - base_sha=$(git merge-base "origin/$BASE_REF" HEAD)
-      - bad=0
       - >-
-        for sha in $(git rev-list "$base_sha"..HEAD); do
-          if git log -1 --format='%B' "$sha" | grep -iqE '^Co-Authored-By:'; then
-            echo "ERROR $(git log -1 --oneline "$sha") has a Co-Authored-By trailer (single-author policy: founder only).";
-            bad=1;
-          fi;
-        done
-      - 'if [ "$bad" -ne 0 ]; then echo "ERROR See .claude/rules/engineering.md — Single author per commit."; exit 1; fi'
+        if git log -1 --format='%B' HEAD | grep -iqE '^Co-Authored-By:'; then
+          echo "ERROR $(git log -1 --oneline HEAD) has a Co-Authored-By trailer (single-author policy: founder only).";
+          echo "See .claude/rules/engineering.md — Single author per commit.";
+          exit 1;
+        fi
 
   - name: no-pii-in-logs
     image: bash

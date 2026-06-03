@@ -31,6 +31,7 @@ This scaffold implements [implementation_plan.md §10.1 (Frontend)](https://gith
 ## Backend (§10.2)
 
 The gear backend should:
+
 1. Verify the GoTrue HS256 JWT against `GOTRUE_JWT_SECRET`.
 2. Connect to the shared Postgres with `search_path=endorsekit,cortex`.
 3. Read access state from `cortex.users.access_until` (read-only grant).
