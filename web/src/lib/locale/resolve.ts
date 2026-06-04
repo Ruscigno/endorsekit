@@ -36,7 +36,10 @@ export function pickFromAcceptLanguage(header: string | null): Locale | null {
   const tags = header
     .split(",")
     .map((entry, index) => {
-      const [tag, ...params] = entry.trim().split(";").map((s) => s.trim());
+      const [tag, ...params] = entry
+        .trim()
+        .split(";")
+        .map((s) => s.trim());
       const qParam = params.find((p) => p.startsWith("q="));
       const q = qParam ? Number(qParam.slice(2)) : 1;
       return { tag, q: Number.isFinite(q) ? q : 0, index };

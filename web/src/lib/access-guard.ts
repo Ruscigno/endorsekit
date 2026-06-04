@@ -19,7 +19,8 @@ export interface CortexMe {
 
 // Cortex hub URLs. Same-origin once Cloudflared serves both gear + hub
 // from aviationcortex.com; cross-origin only during local dev.
-const CORTEX_HUB_BASE = privateEnv.CORTEX_HUB_URL || "https://aviationcortex.com";
+const CORTEX_HUB_BASE =
+  privateEnv.CORTEX_HUB_URL || "https://aviationcortex.com";
 const CORTEX_API_BASE = privateEnv.CORTEX_API_URL || "http://localhost:8011";
 
 export const SIGNIN_PATH = `${CORTEX_HUB_BASE}/signin`;
@@ -29,7 +30,9 @@ function signinTarget(via: string): string {
   return `${SIGNIN_PATH}?next=${encodeURIComponent(via)}`;
 }
 
-export async function requireActiveAccess(event: RequestEvent): Promise<CortexMe> {
+export async function requireActiveAccess(
+  event: RequestEvent,
+): Promise<CortexMe> {
   const session = event.locals.session;
   if (!session) {
     throw redirect(303, signinTarget(event.url.pathname));

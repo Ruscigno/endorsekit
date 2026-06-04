@@ -16,7 +16,9 @@ export interface LocaleStore {
   get: () => Locale;
 }
 
-export function createLocaleStore(initial: Locale = DEFAULT_LOCALE): LocaleStore {
+export function createLocaleStore(
+  initial: Locale = DEFAULT_LOCALE,
+): LocaleStore {
   let current: Locale = initial;
   const subscribers = new Set<(value: Locale) => void>();
   return {
