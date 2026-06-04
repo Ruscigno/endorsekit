@@ -174,15 +174,17 @@ steps:
       # Colima exposes Docker on a per-user socket, not /var/run/docker.sock.
       DOCKER_HOST: unix:///Users/sander/.colima/default/docker.sock
     commands:
-      # Bind host port 5444 (sibling repos use 5432/5433/5434/5435).
-      # supabase/postgres ships with the `auth` schema + auth.users table
-      # that the RLS migrations reference.
+      # Bind host port 5444 (each gear's CI Postgres on its own port).
+      # postgres:16-alpine — fast + reliable. The gear's migration lives in
+      # its own `endorsekit` schema and does not reference Supabase's
+      # auth.users (Cortex shared-Postgres model), so the heavier
+      # supabase/postgres image (which init-races) isn't needed.
       - >-
         docker run -d --rm --name endorsekit-pg-ci
         -e POSTGRES_PASSWORD=postgres
         -e POSTGRES_DB=postgres
         -p 5444:5432
-        supabase/postgres:15.8.1.060
+        postgres:16-alpine
       - 'for i in $(seq 1 60); do docker exec endorsekit-pg-ci pg_isready -U postgres >/dev/null 2>&1 && exit 0; sleep 1; done; echo "postgres did not become ready"; docker logs endorsekit-pg-ci; exit 1'
 
   - name: db-migrate
