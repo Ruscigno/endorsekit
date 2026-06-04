@@ -35,6 +35,15 @@
     </p>
   </header>
 
+  {#if data.roster.length === 0}
+    <div class="empty">
+      <p class="empty__title">No students on your roster yet</p>
+      <p class="empty__body">
+        When you add a student and issue their first endorsement, it appears here
+        grouped by student with its validity status and expiry date.
+      </p>
+    </div>
+  {:else}
   <ul class="students">
     {#each data.roster as row (row.student.id)}
       <li class="student">
@@ -70,6 +79,7 @@
       </li>
     {/each}
   </ul>
+  {/if}
 
   <!--
     Aviation-domain disclaimer — calibrated regulatory-record bar
@@ -119,6 +129,25 @@
     border: 1px solid #e2e8f0;
     border-radius: 0.625rem;
     padding: 1rem 1.125rem;
+  }
+  .empty {
+    margin-top: 1.5rem;
+    border: 1px dashed #cbd5e1;
+    border-radius: 0.625rem;
+    padding: 2rem 1.5rem;
+    text-align: center;
+    background: #f8fafc;
+  }
+  .empty__title {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    margin: 0;
+  }
+  .empty__body {
+    color: #64748b;
+    font-size: 0.875rem;
+    margin: 0.5rem auto 0;
+    max-width: 28rem;
   }
   .student__top {
     display: flex;

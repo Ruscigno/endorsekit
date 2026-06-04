@@ -34,9 +34,12 @@ vertical slice — the genuine next phase after an empty shell — is:
 4. the **registry screen** — the home route — rendering the registry grouped by
    student with status badges + expiry dates through that seam.
 
-This slice deliberately renders a working product surface **without** taking a
-dependency on the still-in-flight Go backend (the sealed/hash-chained issuance
-path), shared Postgres, or any new package.
+This slice renders a working product surface **without** taking a dependency on
+the still-in-flight Go backend (the sealed/hash-chained issuance path). It now
+also lands the **read-side persistence**: the gear's own `endorsekit` tables in
+the shared Cortex Postgres and a Postgres-backed `EndorsementRepository`, with
+the in-memory seed kept as the fallback for local dev and the DB-less CI `web`
+lane. (The WRITE path — sealed issuance — still stays in the Go backend.)
 
 ## 3. What this PR delivers
 
@@ -46,7 +49,8 @@ path), shared Postgres, or any new package.
 | Domain types | `web/src/lib/endorsements/types.ts` | Two-table shape: a validity `rule` per template, an `IssuedEndorsement` per registry row, the per-student rollup. |
 | Engine | `web/src/lib/endorsements/engine.ts` (+test) | `computeStatuses(...)`, one cited function per rule; status band + per-student worst-band rollup. |
 | Data seam | `web/src/lib/repo/repository.ts`, `seed.ts` | `EndorsementRepository` interface (read-only) + deterministic in-memory adapter. (`repo/`, not `data/`, which the repo-root `.gitignore` excludes.) |
-| Registry screen | `web/src/routes/+page.server.ts`, `+page.svelte` | Registry grouped by student, status badges + expiry dates + the calibrated disclaimer. |
+| **Persistence** | `db/migrations/0001_endorsekit_core.{up,down}.sql`, `web/src/lib/repo/postgres.ts` (+test) | Real `endorsekit.student` + `endorsekit.endorsement` tables in the shared Cortex Postgres + a Postgres-backed (read-side) `EndorsementRepository` (postgres.js), scoped by `owner_user_id` on every query. |
+| Registry screen | `web/src/routes/+page.server.ts`, `+page.svelte` | Registry grouped by student, status badges + expiry dates + an empty state (no students yet) + the calibrated disclaimer. Uses Postgres when `DATABASE_URL` is set, else the seed. |
 | CI: web isolation | `web/pnpm-workspace.yaml`, `web/pnpm-lock.yaml` | Isolates `web/` as its own pnpm root so the `web/**` lane installs. |
 | CI: single-author hardening | `.woodpecker/pr.yml` | Replaced the base-walking `git merge-base` check (exits 128 on the local backend's shallow clone) with a tip-only Co-Authored-By check. |
 
@@ -86,14 +90,52 @@ It does **not** invent endorsement wording or rules.
   tier). Mitigated by keeping the engine I/O-free and its tests behavioural, so
   a port is a mechanical mirror.
 
-- **The repository seam is read-only.** The append-only registry is the legal-
-  record heart of the product (ADR-0002); issuance must go through the Go
-  backend that seals and hash-chains each row — never a write path in `web/`.
-  `EndorsementRepository` therefore exposes only `listStudents` /
-  `listEndorsements`. The route depends on the interface, not a driver; swapping
-  the in-memory adapter for a real (read-side) one is a one-file change. **Trade-
-  off:** the screen shows demo data until the real adapter lands — acceptable
-  for a first slice and clearly labeled.
+- **The repository seam is read-only, with two adapters — real Postgres + seed
+  fallback.** The append-only registry is the legal-record heart of the product
+  (ADR-0002); issuance must go through the Go backend that seals and
+  hash-chains each row — never a write path in `web/`. `EndorsementRepository`
+  therefore exposes only `listStudents` / `listEndorsements`. The route depends
+  on the interface, not a driver: `+page.server.ts` picks `postgresRepository`
+  when `DATABASE_URL` is set, else `seedRepository`. The Postgres adapter
+  connects with the gear's `endorsekit_app` role and reads the `endorsekit`
+  schema, scoping every query `WHERE owner_user_id = $cfi`. The pure row→domain
+  mappers are exported and unit-tested (the CI `web` lane has no DB; the `db`
+  lane round-trips the migration separately). **Trade-off:** the seed renders
+  demo data when `DATABASE_URL` is unset (local dev / CI), which is intended —
+  the same contract drives both, so the surface is identical either way.
+
+- **The gear owns its tables via its own migration.** `db/migrations/0001_endorsekit_core`
+  creates `endorsekit.student` and `endorsekit.endorsement` with
+  `CREATE SCHEMA IF NOT EXISTS endorsekit` first, so the migration is
+  self-contained and the CI `db`-round-trip lane (`up → down-all → up`) applies
+  it against an empty ephemeral Postgres without the platform migrations. The
+  Cortex platform migration only creates the empty `endorsekit` namespace and
+  grants the `endorsekit_app` role ownership; the `down` migration drops the two
+  TABLES only, never the schema (the platform owns the namespace). No
+  cross-schema FK to `cortex.users` is declared — the gear schema can SELECT
+  `cortex.*` but must stay applyable in isolation. Validated locally:
+  `up → down-all → up` round-trips clean on Postgres 16. **Trade-off:** the
+  read-side table set carries only the columns the expiry engine needs
+  (`owner_user_id`, `student_id`, `rule`, `label`, `scope`, `issued_on`); the
+  sealed/hash-chained seal/audit columns (ADR-0002) land with the Go issuance
+  path in a later, founder-reviewed migration.
+
+- **`owner_user_id` predicate, not RLS, as the gear-tier control.** The
+  `endorsekit_app` role *owns* its schema, so Postgres RLS would not gate it
+  (table owners bypass RLS). The real control here is server-side scoping by the
+  authenticated Cortex user id (the CFI) on every query — `WHERE owner_user_id =
+  ${ownerCfiId}` — mirroring the Go backend's per-request owner predicate
+  (product-research §4.3). **Trade-off:** RLS-as-defense-in-depth is deferred to
+  the Go backend tier (which can run under a non-owning role); for this
+  read-only web adapter the owner predicate is the single, audited gate.
+
+- **One new dependency — `postgres` (postgres.js).** A pure-JS, zero-native-deps,
+  server-only Postgres client for the persistence adapter, landed in
+  `dependencies` (not dev) with the lockfile committed. New external
+  dependencies are a founder-only category — this one is **founder-authorized**
+  for the persistence work. Server-only: imported from
+  `+page.server.ts` / `repo/postgres.ts`, never client code, so the browser
+  never sees the connection string.
 
 - **14-day "expiring soon" amber band.** Tighter than CurrencyHub's 30-day band
   because the dominant endorsement window is the 90-day solo: a 30-day amber
@@ -122,20 +164,23 @@ It does **not** invent endorsement wording or rules.
   the sibling repos). The single-author policy is unchanged; only the mechanism
   is.
 
-- **No new dependencies.** Everything uses the scaffold's pinned toolchain, so
-  this PR needs no founder dependency approval. Coverage instrumentation
-  (`@vitest/coverage-v8`) is intentionally deferred — CI's `pnpm test --coverage`
-  no-ops because of the `--` passthrough, and the tests run green under plain
-  `vitest run`.
+- **Exactly one new dependency (`postgres`), founder-authorized.** Beyond the
+  persistence client (see the postgres.js trade-off above) the slice uses the
+  scaffold's pinned toolchain. Coverage instrumentation (`@vitest/coverage-v8`)
+  is intentionally deferred — CI's `pnpm test --coverage` no-ops because of the
+  `--` passthrough, and the tests run green under plain `vitest run`.
 
 ## 6. Out of scope (next phases)
 
 The sealed/hash-chained issuance flow + the AC 61-65 template catalog (Weeks
-2–3), the real read-side Postgres adapter behind `EndorsementRepository`,
-endorsement-PDF rendering, the student CRM / ACS checklist, the booking surface,
-Stripe Connect, and the daily reminder cron — all remain per
-`product-research.md` §5/§6. The disclaimer is rendered on the registry surface
-here but not yet persisted/versioned at signup.
+2–3) — i.e. the WRITE path that populates `endorsekit.endorsement` and adds the
+seal/audit columns + append-only trigger — plus endorsement-PDF rendering, the
+student CRM / ACS checklist, the booking surface, Stripe Connect, and the daily
+reminder cron — all remain per `product-research.md` §5/§6. The read-side
+Postgres adapter lands in this PR; the student/endorsement CRUD UI does not (the
+gear has no rows until the Go issuance path writes them, hence the empty state).
+The disclaimer is rendered on the registry surface here but not yet
+persisted/versioned at signup.
 
 ## 7. Acceptance criteria met
 
@@ -144,7 +189,11 @@ here but not yet persisted/versioned at signup.
 - Each validity rule and each status band (active / expiring-soon / expired /
   no-expiry) plus the per-student rollup has a table-driven test.
 - The registry screen renders the registry grouped by student with status badges
-  + expiry dates and the calibrated disclaimer on the verdict surface
-  (`.claude/rules/security.md` requirement).
-- `web/` lint + check + build pass; the `web/**` CI lane can install (committed
-  `web/pnpm-lock.yaml`).
+  + expiry dates, an empty state when the CFI has no students yet, and the
+  calibrated disclaimer on the verdict surface (`.claude/rules/security.md`
+  requirement).
+- The gear's `endorsekit.student` / `endorsekit.endorsement` migration
+  round-trips (`up → down-all → up`) on Postgres 16; the pure row→domain mappers
+  (`repo/postgres.ts`) are unit-tested without a live DB.
+- `web/` lint + check + test + build pass; the `web/**` CI lane can install
+  (committed `web/pnpm-lock.yaml`, with `postgres` in `dependencies`).
