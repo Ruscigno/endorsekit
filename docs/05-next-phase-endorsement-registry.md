@@ -52,7 +52,7 @@ lane. (The WRITE path — sealed issuance — still stays in the Go backend.)
 | **Persistence** | `db/migrations/0001_endorsekit_core.{up,down}.sql`, `web/src/lib/repo/postgres.ts` (+test) | Real `endorsekit.student` + `endorsekit.endorsement` tables in the shared Cortex Postgres + a Postgres-backed (read-side) `EndorsementRepository` (postgres.js), scoped by `owner_user_id` on every query. |
 | Registry screen | `web/src/routes/+page.server.ts`, `+page.svelte` | Registry grouped by student, status badges + expiry dates + an empty state (no students yet) + the calibrated disclaimer. Uses Postgres when `DATABASE_URL` is set, else the seed. |
 | CI: web isolation | `web/pnpm-workspace.yaml`, `web/pnpm-lock.yaml` | Isolates `web/` as its own pnpm root so the `web/**` lane installs. |
-| CI: single-author hardening | `.woodpecker/pr.yml` | Replaced the base-walking `git merge-base` check (exits 128 on the local backend's shallow clone) with a tip-only Co-Authored-By check. |
+| CI: single-author hardening | `.woodpecker/pr.yml` | Walks **every non-merge commit** in the PR range for a `Co-Authored-By` trailer. The base is resolved robustly (PR base env var → `feat/web-app-platform-integration` → `main`) and the step **fails loud** if no base resolves, so it never silently degrades to a tip-only check. |
 
 ## 4. Validity rules modeled (each cited; no invented rules)
 
@@ -157,12 +157,15 @@ It does **not** invent endorsement wording or rules.
   `web/` is not part of a monorepo workspace; if the legacy root is later
   retired in favour of a real workspace, this file is removed in that PR.
 
-- **Hardened the `single-author` CI step.** The old step did a base-ref fetch +
-  `git merge-base` + `git rev-list` walk, which exits 128 on the local
-  Woodpecker backend's shallow clone — a false red unrelated to the code. It now
-  inspects the PR tip commit directly for a `Co-Authored-By:` trailer (mirrors
-  the sibling repos). The single-author policy is unchanged; only the mechanism
-  is.
+- **Hardened the `single-author` CI step.** The original step hard-coded
+  `git fetch origin main`, which exits 128 on this repo (no `main` branch) /
+  the local Woodpecker backend's shallow clone — a false red unrelated to the
+  code. The step now **walks every non-merge commit** in the PR range
+  (`$MB..HEAD`), resolving the base robustly (the `CI_COMMIT_PULL_REQUEST_BASE_BRANCH`
+  env var → `feat/web-app-platform-integration` → `main`) and **failing loud** if
+  no base resolves — so an intermediate `Co-Authored-By:` trailer can no longer
+  slip through and the check never silently degrades to tip-only. The
+  single-author policy is unchanged; only the mechanism is.
 
 - **Exactly one new dependency (`postgres`), founder-authorized.** Beyond the
   persistence client (see the postgres.js trade-off above) the slice uses the

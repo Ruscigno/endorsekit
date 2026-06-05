@@ -24,6 +24,5 @@ export const load: PageServerLoad = async ({ parent }) => {
     roster,
     needAttention: countNeedAttention(roster),
     asOf: today.toISOString().slice(0, 10),
-    persistence: env.DATABASE_URL ? "postgres" : "seed",
   };
 };

@@ -76,21 +76,28 @@ export function mapEndorsementRow(row: EndorsementRow): IssuedEndorsement {
 // Lazy singleton connection — created on first use and reused for the life of
 // the (long-running, adapter-node) process.
 let sql: ReturnType<typeof postgres> | null = null;
-function client(): ReturnType<typeof postgres> {
+function client(databaseUrl?: string): ReturnType<typeof postgres> {
   if (!sql) {
-    if (!env.DATABASE_URL) {
+    // Prefer the connection string the factory resolved and threaded in; only
+    // fall back to env when nothing was passed. One source of truth — the
+    // adapter never silently ignores a URL the caller injected.
+    const url = databaseUrl ?? env.DATABASE_URL;
+    if (!url) {
       throw new Error(
         "DATABASE_URL is not set; cannot open the endorsekit Postgres adapter.",
       );
     }
-    sql = postgres(env.DATABASE_URL);
+    sql = postgres(url);
   }
   return sql;
 }
 
 /** An EndorsementRepository backed by the shared Cortex Postgres. */
-export function postgresRepository(ownerCfiId: string): EndorsementRepository {
-  const db = client();
+export function postgresRepository(
+  ownerCfiId: string,
+  databaseUrl?: string,
+): EndorsementRepository {
+  const db = client(databaseUrl);
   return {
     listStudents: async () => {
       const rows = await db<StudentRow[]>`

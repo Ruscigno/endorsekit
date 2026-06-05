@@ -53,6 +53,19 @@ describe("repositoryFor", () => {
     expect(got).toBe("cfi9");
   });
 
+  it("threads the resolved DATABASE_URL into the Postgres adapter (single source)", () => {
+    let gotUrl: string | undefined;
+    repositoryFor(
+      "postgres://threaded",
+      "cfi1",
+      new Date(),
+      (_id, url) => ((gotUrl = url), PG),
+      () => SEED,
+      noop,
+    );
+    expect(gotUrl).toBe("postgres://threaded");
+  });
+
   it("passes `today` to the seed adapter", () => {
     const today = new Date(Date.UTC(2026, 0, 2));
     let got: Date | null = null;

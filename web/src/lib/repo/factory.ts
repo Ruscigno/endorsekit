@@ -20,11 +20,16 @@ export function repositoryFor(
   databaseUrl: string | undefined,
   ownerCfiId: string,
   today: Date,
-  makePostgres: (id: string) => EndorsementRepository = postgresRepository,
+  makePostgres: (
+    id: string,
+    databaseUrl?: string,
+  ) => EndorsementRepository = postgresRepository,
   makeSeed: (today: Date) => EndorsementRepository = seedRepository,
   warn: (msg: string) => void = (m) => console.warn(m),
 ): EndorsementRepository {
-  if (databaseUrl) return makePostgres(ownerCfiId);
+  // Thread the resolved URL into the adapter so it connects to the same string
+  // the factory branched on — not a second, independently-read env value.
+  if (databaseUrl) return makePostgres(ownerCfiId, databaseUrl);
   warn(
     "[endorsekit] DATABASE_URL is not set — serving in-memory SEED data (demo only).",
   );
