@@ -18,10 +18,10 @@
 
 import postgres from "postgres";
 import { env } from "$env/dynamic/private";
-import type {
-  IssuedEndorsement,
-  Student,
-  ValidityRule,
+import {
+  isValidityRule,
+  type IssuedEndorsement,
+  type Student,
 } from "$lib/endorsements/types";
 import type { EndorsementRepository } from "./repository";
 
@@ -46,12 +46,24 @@ export function mapStudentRow(row: StudentRow): Student {
   return { id: row.id, name: row.name };
 }
 
-/** Pure: map a DB endorsement row to the domain `IssuedEndorsement`. */
+/**
+ * Pure: map a DB endorsement row to the domain `IssuedEndorsement`.
+ *
+ * Validates the `text` `rule` column against the closed `ValidityRule` set
+ * with a runtime guard (not a bare cast): an unknown value fails loud here at
+ * the persistence boundary rather than surfacing as a silent `undefined` /
+ * `TypeError` inside the engine.
+ */
 export function mapEndorsementRow(row: EndorsementRow): IssuedEndorsement {
+  if (!isValidityRule(row.rule)) {
+    throw new Error(
+      `endorsement ${row.id} has an unknown validity rule: ${JSON.stringify(row.rule)}`,
+    );
+  }
   const endorsement: IssuedEndorsement = {
     id: row.id,
     studentId: row.student_id,
-    rule: row.rule as ValidityRule,
+    rule: row.rule,
     label: row.label,
     issuedOn: row.issued_on,
   };

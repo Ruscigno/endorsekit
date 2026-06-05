@@ -13,9 +13,13 @@
 
 import type { IssuedEndorsement, Student } from "$lib/endorsements/types";
 
+// Each repository instance is already scoped to ONE owning CFI (the seed
+// adapter to its demo roster; the Postgres adapter to the `ownerCfiId` passed
+// to its factory). The owner is therefore NOT a per-call argument — passing it
+// per call would be a false contract that the adapters silently ignore.
 export interface EndorsementRepository {
   /** The CFI's roster (the per-student rollup targets). */
-  listStudents(ownerCfiId: string): Promise<Student[]>;
+  listStudents(): Promise<Student[]>;
   /** The endorsements the CFI has issued (the append-only registry rows). */
-  listEndorsements(ownerCfiId: string): Promise<IssuedEndorsement[]>;
+  listEndorsements(): Promise<IssuedEndorsement[]>;
 }

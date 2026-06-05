@@ -22,6 +22,13 @@
 <section class="reg">
   <header class="reg__head">
     <h1>Endorsement registry</h1>
+    <!--
+      No trial/access-expiry (`me.access_until`) is shown on this registry
+      surface: access state is the hub's concern — the layout access guard
+      already redirects expired sessions to billing before this page renders —
+      so duplicating the date here would be redundant and could drift from the
+      hub's authoritative view.
+    -->
     <p class="reg__sub">
       Signed in as {data.me.email} · as of {data.asOf} ·
       {#if data.needAttention === 0}

@@ -5,6 +5,7 @@ import {
   endOfMonthAfter,
   parseIso,
   toIso,
+  utcToday,
 } from "./dates";
 
 describe("parseIso / toIso", () => {
@@ -57,7 +58,28 @@ describe("endOfMonthAfter — calendar-month windows", () => {
     ["2024-03-30", 24, "2026-03-31"],
     ["2024-02-29", 24, "2026-02-28"], // leap-day issue, non-leap target
     ["2026-01-15", 24, "2028-01-31"],
+    // December issue (month index 11): m + 24 + 1 = 36 crosses TWO year
+    // boundaries — the only branch where the target month overflows past a
+    // second December. Dec 15 2025 + 24 calendar months -> 2027-12-31.
+    ["2025-12-15", 24, "2027-12-31"],
   ])("issue %s + %i mo -> end of %s", (issue, months, expected) => {
     expect(toIso(endOfMonthAfter(parseIso(issue), months))).toBe(expected);
+  });
+});
+
+describe("utcToday", () => {
+  it("truncates an injected instant to UTC midnight (date-only)", () => {
+    const t = utcToday(new Date("2026-06-04T23:45:12.345Z"));
+    expect(toIso(t)).toBe("2026-06-04");
+    expect(t.getUTCHours()).toBe(0);
+    expect(t.getUTCMinutes()).toBe(0);
+    expect(t.getUTCMilliseconds()).toBe(0);
+  });
+
+  it("uses UTC calendar fields, not the host-local date", () => {
+    // Just before UTC midnight: the UTC date is still the 4th even where the
+    // host's local clock has rolled to the 5th.
+    const t = utcToday(new Date("2026-06-04T23:59:59.999Z"));
+    expect(toIso(t)).toBe("2026-06-04");
   });
 });

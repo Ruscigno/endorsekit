@@ -117,6 +117,15 @@ function outcomeFor(e: IssuedEndorsement): RuleOutcome {
       return calendarMonthOutcome(e.issuedOn, 24, "14 CFR 61.56");
     case "far_61_35_knowledge_test_no_expiry":
       return noExpiryOutcome("14 CFR 61.35 / 61.87(b)");
+    default:
+      // A value the engine doesn't model — only reachable if a row carried
+      // an unrecognized `rule` (a typo, a future migration, corruption) and
+      // slipped past the adapter's `isValidityRule` guard. Fail loud here
+      // rather than returning `undefined` and crashing `healthFor` with an
+      // opaque TypeError downstream.
+      throw new Error(
+        `unknown validity rule: ${(e as IssuedEndorsement).rule}`,
+      );
   }
 }
 
@@ -201,4 +210,15 @@ export function computeStatuses(
       rollup: rollupBand(statuses),
     };
   });
+}
+
+/**
+ * How many students need the CFI's attention — those whose worst band is
+ * expired or expiring-soon. Drives the registry header count. Pure over the
+ * computed roster, so the load function does no derivation of its own.
+ */
+export function countNeedAttention(roster: StudentEndorsements[]): number {
+  return roster.filter(
+    (r) => r.rollup === "expired" || r.rollup === "expiring_soon",
+  ).length;
 }

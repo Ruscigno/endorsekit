@@ -70,3 +70,15 @@ export function endOfMonthAfter(from: Date, months: number): Date {
   // Day 0 of (target month + 1) === last day of the target month.
   return new Date(Date.UTC(y, m + months + 1, 0));
 }
+
+/**
+ * "Today" as a date-only UTC `Date` (midnight) — the single clock read for
+ * the registry, kept here at the boundary so the engine stays pure. The
+ * injectable `now` makes the truncation itself testable without mocking the
+ * global clock; production callers use the default.
+ */
+export function utcToday(now: Date = new Date()): Date {
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+}

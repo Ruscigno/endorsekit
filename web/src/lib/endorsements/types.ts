@@ -39,6 +39,26 @@ export type ValidityRule =
   // engine.ts.) Modeled as a no-expiry record.
   | "far_61_35_knowledge_test_no_expiry";
 
+/** The closed set of validity rules the engine knows how to dispatch on. */
+export const VALIDITY_RULES = [
+  "far_61_87_n_solo_90day",
+  "far_61_87_p_solo_addl_90day",
+  "far_61_93_solo_xc_90day",
+  "far_61_56_flight_review_24mo",
+  "far_61_35_knowledge_test_no_expiry",
+] as const satisfies readonly ValidityRule[];
+
+/**
+ * Runtime guard for a DB-sourced `rule` string. The `rule` column is plain
+ * `text` in Postgres, so a typo / future migration / corruption could yield a
+ * value outside the closed `ValidityRule` set. Validating here (at the trust
+ * boundary) keeps an unknown rule from reaching the engine as a bare cast and
+ * crashing the route for every user with that row.
+ */
+export function isValidityRule(value: string): value is ValidityRule {
+  return (VALIDITY_RULES as readonly string[]).includes(value);
+}
+
 /** A registry-issued endorsement: one immutable row per issuance. */
 export interface IssuedEndorsement {
   id: string;

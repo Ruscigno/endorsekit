@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseIso } from "./dates";
-import { computeStatuses, statusFor } from "./engine";
+import { computeStatuses, countNeedAttention, statusFor } from "./engine";
 import type {
   EndorsementHealth,
   IssuedEndorsement,
@@ -198,5 +198,25 @@ describe("computeStatuses — per-student rollup", () => {
     const first = computeStatuses(endorsements, students, ASOF);
     const second = computeStatuses(endorsements, students, ASOF);
     expect(first).toEqual(second);
+  });
+
+  it("countNeedAttention counts only expired + expiring-soon rollups", () => {
+    const rows = computeStatuses(endorsements, students, ASOF);
+    // a -> active, b -> expired, c -> no_expiry, d -> no_expiry => 1.
+    expect(countNeedAttention(rows)).toBe(1);
+    expect(countNeedAttention([])).toBe(0);
+  });
+});
+
+describe("unknown validity rule (runtime guard)", () => {
+  it("throws rather than returning undefined when a row carries an unmodeled rule", () => {
+    // Simulates a DB row whose `text` rule slipped past the adapter guard
+    // (typo / future migration / corruption). The engine must fail loud, not
+    // crash opaquely in healthFor.
+    const bogus = endorsement(
+      "totally_made_up_rule" as ValidityRule,
+      "2026-01-01",
+    );
+    expect(() => statusFor(bogus, ASOF)).toThrow(/unknown validity rule/);
   });
 });

@@ -2,14 +2,28 @@
 //
 // Deterministic demo data so the registry screen renders a working slice
 // while the append-only Postgres registry (product-research §4.2) is still
-// in flight. Dates are expressed relative to a fixed anchor so the seeded
-// roster always shows one of each status band (active / expiring-soon /
-// expired / no-expiry) regardless of when the page loads; `asOf` is still
+// in flight. Issue dates are derived from the caller-supplied `today` so the
+// seeded roster ALWAYS shows one of each status band (active / expiring-soon /
+// expired / no-expiry) on any load day: day-window items use a day offset, and
+// the 24-calendar-month flight review anchors to a month boundary (not a raw
+// day count) so it can never slip into the amber band. `asOf` is still
 // supplied by the caller, keeping the engine pure.
 
 import { addDays, toIso } from "$lib/endorsements/dates";
 import type { IssuedEndorsement, Student } from "$lib/endorsements/types";
 import type { EndorsementRepository } from "./repository";
+
+/**
+ * The first day of the month `monthsBack` calendar months before `from`.
+ * Used to anchor the 24-calendar-month flight-review demo so its expiry lands
+ * on a fixed month boundary (not `today − N days`), keeping the seeded band
+ * deterministic regardless of the day-of-month the page loads.
+ */
+function firstOfMonthBack(from: Date, monthsBack: number): Date {
+  return new Date(
+    Date.UTC(from.getUTCFullYear(), from.getUTCMonth() - monthsBack, 1),
+  );
+}
 
 const STUDENTS: Student[] = [
   { id: "stu-amelia", name: "Amelia Park" },
@@ -59,15 +73,18 @@ function seedEndorsements(today: Date): IssuedEndorsement[] {
       scope: "Piper PA-28",
       issuedOn: toIso(addDays(today, -100)),
     },
-    // Chen — a flight-review-style 24-calendar-month item issued 23 months
-    // ago (~30 days of runway, still active under the 14-day amber band) and
-    // an active fresh solo endorsement.
+    // Chen — a flight-review-style 24-calendar-month item issued on the FIRST
+    // of the month 23 calendar months ago. Its 24-calendar-month window
+    // (`endOfMonthAfter`) therefore lapses at the end of NEXT month relative
+    // to `today` — always ~30-60 days of runway, deterministically `active`
+    // regardless of the day-of-month the page loads (the day-count `-700`
+    // anchor used before could land in the 14-day amber band on some days).
     {
       id: "end-5",
       studentId: "stu-chen",
       rule: "far_61_56_flight_review_24mo",
       label: "Flight review",
-      issuedOn: toIso(addDays(today, -700)),
+      issuedOn: toIso(firstOfMonthBack(today, 23)),
     },
     {
       id: "end-6",

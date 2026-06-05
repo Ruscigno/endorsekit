@@ -65,4 +65,20 @@ describe("mapEndorsementRow", () => {
     });
     expect(e.issuedOn).toBe("2024-07-01");
   });
+
+  it("rejects an unknown `rule` value at the persistence boundary", () => {
+    // The `rule` column is plain `text`; a typo / future migration / corruption
+    // could carry a value outside the closed ValidityRule set. The mapper must
+    // throw here rather than passing a bare cast on to the engine.
+    expect(() =>
+      mapEndorsementRow({
+        id: "end-bad",
+        student_id: "stu-amelia",
+        rule: "far_99_made_up",
+        label: "Mystery endorsement",
+        scope: null,
+        issued_on: "2026-01-01",
+      }),
+    ).toThrow(/unknown validity rule/);
+  });
 });
