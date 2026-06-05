@@ -76,19 +76,28 @@ steps:
       - event: pull_request
     commands:
       # Single-author policy: no Co-Authored-By trailers on PR commits.
-      # See .claude/rules/engineering.md.
-      - 'BASE_REF="$${CI_COMMIT_PULL_REQUEST_BASE_BRANCH:-main}"'
-      - git fetch origin "$BASE_REF" --depth=200 --quiet
-      - base_sha=$(git merge-base "origin/$BASE_REF" HEAD)
-      - bad=0
+      # Resolve the PR base ref robustly: the local Woodpecker backend leaves
+      # CI_COMMIT_PULL_REQUEST_BASE_BRANCH empty, which would collapse the
+      # range to HEAD (tip-only) and let an intermediate trailer slip through.
+      # Try the env var, then the known stacked base, then main; FAIL LOUD if
+      # none resolves, then walk every non-merge commit in the PR range.
+      # See .claude/rules/engineering.md — Single author per commit.
       - >-
-        for sha in $(git rev-list "$base_sha"..HEAD); do
-          if git log -1 --format='%B' "$sha" | grep -iqE '^Co-Authored-By:'; then
-            echo "ERROR $(git log -1 --oneline "$sha") has a Co-Authored-By trailer (single-author policy: founder only).";
-            bad=1;
+        BASE="";
+        for CAND in "$${CI_COMMIT_PULL_REQUEST_BASE_BRANCH}" feat/web-app-platform-integration main; do
+          [ -n "$CAND" ] || continue;
+          if git fetch origin "$CAND" --depth=200 --quiet 2>/dev/null; then BASE="$(git rev-parse FETCH_HEAD)"; break; fi;
+        done;
+        if [ -z "$BASE" ]; then echo "ERROR single-author: cannot resolve the PR base branch to walk the commit range."; exit 1; fi;
+        MB="$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")";
+        BAD=0;
+        for SHA in $(git rev-list --no-merges "$MB..HEAD"); do
+          if git log -1 --format='%B' "$SHA" | grep -iqE '^Co-Authored-By:'; then
+            echo "ERROR $(git log -1 --oneline "$SHA") has a Co-Authored-By trailer (single-author policy: founder only).";
+            BAD=1;
           fi;
-        done
-      - 'if [ "$bad" -ne 0 ]; then echo "ERROR See .claude/rules/engineering.md — Single author per commit."; exit 1; fi'
+        done;
+        if [ "$BAD" -ne 0 ]; then echo "See .claude/rules/engineering.md — single author per commit."; exit 1; fi
 
   - name: no-pii-in-logs
     image: bash
@@ -177,15 +186,17 @@ steps:
       # Colima exposes Docker on a per-user socket, not /var/run/docker.sock.
       DOCKER_HOST: unix:///Users/sander/.colima/default/docker.sock
     commands:
-      # Bind host port 5436 (sibling repos use 5432/5433/5434/5435).
-      # supabase/postgres ships with the `auth` schema + auth.users table
-      # that the RLS migrations reference.
+      # Bind host port 5444 (each gear's CI Postgres on its own port).
+      # postgres:16-alpine — fast + reliable. The gear's migration lives in
+      # its own `endorsekit` schema and does not reference Supabase's
+      # auth.users (Cortex shared-Postgres model), so the heavier
+      # supabase/postgres image (which init-races) isn't needed.
       - >-
         docker run -d --rm --name endorsekit-pg-ci
         -e POSTGRES_PASSWORD=postgres
         -e POSTGRES_DB=postgres
-        -p 5436:5432
-        supabase/postgres:15.8.1.060
+        -p 5444:5432
+        postgres:16-alpine
       - 'for i in $(seq 1 60); do docker exec endorsekit-pg-ci pg_isready -U postgres >/dev/null 2>&1 && exit 0; sleep 1; done; echo "postgres did not become ready"; docker logs endorsekit-pg-ci; exit 1'
 
   - name: db-migrate
@@ -193,7 +204,7 @@ steps:
     when:
       - path: ['db/migrations/**']
     environment:
-      DB: postgres://postgres:postgres@localhost:5436/postgres?sslmode=disable
+      DB: postgres://postgres:postgres@localhost:5444/postgres?sslmode=disable
     commands:
       - migrate -path db/migrations -database "$DB" up
       - migrate -path db/migrations -database "$DB" down -all

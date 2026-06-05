@@ -54,7 +54,7 @@ repos:
     hooks:
       - id: web-lint
         name: pnpm lint (web)
-        entry: bash -c 'if [ -d web ] && [ -f web/package.json ]; then cd web && pnpm lint --fix; fi'
+        entry: bash -c 'if [ -d web ] && [ -f web/package.json ]; then cd web && pnpm format; fi'
         language: system
         files: '^web/.*\.(ts|tsx|js|jsx|svelte)$'
         pass_filenames: false
