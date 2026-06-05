@@ -1,28 +1,16 @@
 import type { PageServerLoad } from "./$types";
 import { env } from "$env/dynamic/private";
 import { utcToday } from "$lib/endorsements/dates";
-import { computeStatuses, countNeedAttention } from "$lib/endorsements/engine";
+import { buildRegistryView } from "$lib/endorsements/registry-view";
 import { repositoryFor } from "$lib/repo/factory";
 
+// Thin impure seam: read the clock, select the repository (Postgres when
+// DATABASE_URL is set, else seed — branch in $lib/repo/factory.ts), and delegate
+// the I/O + shaping (incl. error handling) to the tested `buildRegistryView`.
 export const load: PageServerLoad = async ({ parent }) => {
   const { me } = await parent();
-
-  // The only impurity (reading the clock) lives at this boundary;
-  // `computeStatuses` stays a pure function of (endorsements, students, asOf).
   const today = utcToday();
-  // Each repository instance is already owner-scoped at construction, so the
-  // list methods take no argument.
+  // Each repository instance is already owner-scoped at construction.
   const repo = repositoryFor(env.DATABASE_URL, me.id, today);
-  const [students, endorsements] = await Promise.all([
-    repo.listStudents(),
-    repo.listEndorsements(),
-  ]);
-
-  const roster = computeStatuses(endorsements, students, today);
-
-  return {
-    roster,
-    needAttention: countNeedAttention(roster),
-    asOf: today.toISOString().slice(0, 10),
-  };
+  return buildRegistryView(repo, today, me.id);
 };

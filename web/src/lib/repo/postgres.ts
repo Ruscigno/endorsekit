@@ -73,23 +73,32 @@ export function mapEndorsementRow(row: EndorsementRow): IssuedEndorsement {
   return endorsement;
 }
 
-// Lazy singleton connection — created on first use and reused for the life of
-// the (long-running, adapter-node) process.
-let sql: ReturnType<typeof postgres> | null = null;
+// One pooled connection PER connection string, created on first use and reused
+// for the life of the (long-running, adapter-node) process. The string is
+// threaded in from the factory (the single source of truth that already decided
+// to use Postgres); it falls back to env.DATABASE_URL only when nothing was
+// passed, so the factory's URL and the live connection never diverge.
+//
+// Keying by URL (not a single `let sql`) means a SECOND, different `databaseUrl`
+// is no longer silently ignored — it gets its own pool — which matters for
+// integration tests that swap the URL between cases. And because `postgres(url)`
+// is synchronous with NO await between the `get` and the `set`, Node's
+// single-threaded event loop cannot interleave two concurrent cold-starts into
+// two pools for the same URL.
+const pools = new Map<string, ReturnType<typeof postgres>>();
 function client(databaseUrl?: string): ReturnType<typeof postgres> {
-  if (!sql) {
-    // Prefer the connection string the factory resolved and threaded in; only
-    // fall back to env when nothing was passed. One source of truth — the
-    // adapter never silently ignores a URL the caller injected.
-    const url = databaseUrl ?? env.DATABASE_URL;
-    if (!url) {
-      throw new Error(
-        "DATABASE_URL is not set; cannot open the endorsekit Postgres adapter.",
-      );
-    }
-    sql = postgres(url);
+  const url = databaseUrl ?? env.DATABASE_URL;
+  if (!url) {
+    throw new Error(
+      "DATABASE_URL is not set; cannot open the endorsekit Postgres adapter.",
+    );
   }
-  return sql;
+  let pool = pools.get(url);
+  if (!pool) {
+    pool = postgres(url);
+    pools.set(url, pool);
+  }
+  return pool;
 }
 
 /** An EndorsementRepository backed by the shared Cortex Postgres. */

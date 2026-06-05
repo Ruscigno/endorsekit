@@ -51,41 +51,41 @@
       </p>
     </div>
   {:else}
-  <ul class="students">
-    {#each data.roster as row (row.student.id)}
-      <li class="student">
-        <div class="student__top">
-          <span class="student__name">{row.student.name}</span>
-          <span class="badge badge--{row.rollup}">{HEALTH_LABEL[row.rollup]}</span>
-        </div>
-
-        {#if row.endorsements.length === 0}
-          <p class="student__empty">No endorsements issued yet.</p>
-        {:else}
-          <ul class="ends">
-            {#each row.endorsements as e (e.id)}
-              <li class="end end--{e.health}">
-                <div class="end__top">
-                  <span class="end__label">
-                    {e.label}{#if e.scope}<span class="end__scope"> · {e.scope}</span
-                      >{/if}
-                  </span>
-                  <span class="badge badge--{e.health}">{HEALTH_LABEL[e.health]}</span>
-                </div>
-                <div class="end__meta">
-                  <span
-                    >{e.expiresOn ? `Expires ${e.expiresOn}` : "No expiry"}</span
-                  >
-                  <span class="end__rel">{remainingText(e.daysRemaining)}</span>
-                </div>
-                <p class="end__detail">{e.detail}</p>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </li>
-    {/each}
-  </ul>
+    <ul class="students">
+      {#each data.roster as row (row.student.id)}
+        <li class="student">
+          <div class="student__top">
+            <span class="student__name">{row.student.name}</span>
+            <span class="badge badge--{row.rollup}">{HEALTH_LABEL[row.rollup]}</span>
+          </div>
+  
+          {#if row.endorsements.length === 0}
+            <p class="student__empty">No endorsements issued yet.</p>
+          {:else}
+            <ul class="ends">
+              {#each row.endorsements as e (e.id)}
+                <li class="end end--{e.health}">
+                  <div class="end__top">
+                    <span class="end__label">
+                      {e.label}{#if e.scope}<span class="end__scope"> · {e.scope}</span
+                        >{/if}
+                    </span>
+                    <span class="badge badge--{e.health}">{HEALTH_LABEL[e.health]}</span>
+                  </div>
+                  <div class="end__meta">
+                    <span
+                      >{e.expiresOn ? `Expires ${e.expiresOn}` : "No expiry"}</span
+                    >
+                    <span class="end__rel">{remainingText(e.daysRemaining)}</span>
+                  </div>
+                  <p class="end__detail">{e.detail}</p>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </li>
+      {/each}
+    </ul>
   {/if}
 
   <!--
