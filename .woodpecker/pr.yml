@@ -162,6 +162,7 @@ steps:
     when:
       - path: ['backend/**', 'db/migrations/**']
     commands:
+      - 'test -d backend || { echo "skip: no backend/ directory yet"; exit 0; }'
       - cd backend
       - test -f go.mod || { echo "no backend/go.mod yet — skipping"; exit 0; }
       - gofmt -l . | tee /tmp/gofmt.out
