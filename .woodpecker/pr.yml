@@ -76,16 +76,28 @@ steps:
       - event: pull_request
     commands:
       # Single-author policy: no Co-Authored-By trailers on PR commits.
-      # Tip-only check — the local Woodpecker backend's shallow clone makes
-      # a base-ref fetch + `git merge-base` walk exit 128, so we inspect the
-      # PR tip commit directly (mirrors currency-hub / sibling repos).
-      # See .claude/rules/engineering.md.
+      # Resolve the PR base ref robustly: the local Woodpecker backend leaves
+      # CI_COMMIT_PULL_REQUEST_BASE_BRANCH empty, which would collapse the
+      # range to HEAD (tip-only) and let an intermediate trailer slip through.
+      # Try the env var, then the known stacked base, then main; FAIL LOUD if
+      # none resolves, then walk every non-merge commit in the PR range.
+      # See .claude/rules/engineering.md — Single author per commit.
       - >-
-        if git log -1 --format='%B' HEAD | grep -iqE '^Co-Authored-By:'; then
-          echo "ERROR $(git log -1 --oneline HEAD) has a Co-Authored-By trailer (single-author policy: founder only).";
-          echo "See .claude/rules/engineering.md — Single author per commit.";
-          exit 1;
-        fi
+        BASE="";
+        for CAND in "$${CI_COMMIT_PULL_REQUEST_BASE_BRANCH}" feat/web-app-platform-integration main; do
+          [ -n "$CAND" ] || continue;
+          if git fetch origin "$CAND" --depth=200 --quiet 2>/dev/null; then BASE="$(git rev-parse FETCH_HEAD)"; break; fi;
+        done;
+        if [ -z "$BASE" ]; then echo "ERROR single-author: cannot resolve the PR base branch to walk the commit range."; exit 1; fi;
+        MB="$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")";
+        BAD=0;
+        for SHA in $(git rev-list --no-merges "$MB..HEAD"); do
+          if git log -1 --format='%B' "$SHA" | grep -iqE '^Co-Authored-By:'; then
+            echo "ERROR $(git log -1 --oneline "$SHA") has a Co-Authored-By trailer (single-author policy: founder only).";
+            BAD=1;
+          fi;
+        done;
+        if [ "$BAD" -ne 0 ]; then echo "See .claude/rules/engineering.md — single author per commit."; exit 1; fi
 
   - name: no-pii-in-logs
     image: bash
