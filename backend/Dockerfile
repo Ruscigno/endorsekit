@@ -8,7 +8,7 @@
 # Phase 5 / M2 lands them, `.woodpecker/deploy.yml`'s backend-preflight step
 # soft-skips (exit 78) when go.mod is absent.
 
-FROM golang:1.25-alpine AS build
+FROM golang:1.26-alpine AS build
 WORKDIR /src
 
 # Cache module downloads on go.{mod,sum} changes only.
