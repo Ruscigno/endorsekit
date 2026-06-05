@@ -9,8 +9,10 @@
 # least as new as the code that talks to it.
 
 when:
-  - event: push
-    branch: main
+  # Stale Cloud-Run/Supabase deploy, superseded by the Mac-stack pivot (ADR-0007);
+  # gated to manual until the deploy.yml rewrite + DB secret land so it stops
+  # erroring every push on the missing SUPABASE_DB_URL secret.
+  - event: manual
 
 # Skip auto-clone; do it manually as the first step — see .woodpecker/pr.yml
 # for the full rationale (Woodpecker ignores `image:` on the `clone:` block).
