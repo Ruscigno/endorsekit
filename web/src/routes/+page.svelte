@@ -58,7 +58,7 @@
             <span class="student__name">{row.student.name}</span>
             <span class="badge badge--{row.rollup}">{HEALTH_LABEL[row.rollup]}</span>
           </div>
-  
+
           {#if row.endorsements.length === 0}
             <p class="student__empty">No endorsements issued yet.</p>
           {:else}
