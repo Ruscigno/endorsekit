@@ -51,53 +51,43 @@ steps:
   # ----------------------------------------------------------------------
   # Always-on gates
   # ----------------------------------------------------------------------
+# >>> shared-ci-gates (managed by iac-tickerbeats/ci/gates — do not edit) >>>
+  - name: gates-integrity
+    image: bash
+    when:
+      - event: pull_request
+    commands:
+      - bash scripts/check-ci-gates-integrity.sh
   - name: secret-scan
     image: bash
     commands:
-      # Scan the full git history of this branch (not just the working
-      # tree) so accidentally-committed-then-removed secrets are caught.
-      # The .gitleaks.toml allowlist covers .env.example and docs/.
-      - gitleaks detect --no-banner --redact --source=.
-
+      - bash scripts/check-secret-scan.sh
   - name: sast
     image: bash
     commands:
-      - >-
-        semgrep ci
-        --config p/owasp-top-ten
-        --config p/security-audit
-        --config p/typescript
-        --config p/javascript
-        --config p/golang
-
+      - bash scripts/check-sast.sh
   - name: single-author
     image: bash
     when:
       - event: pull_request
     commands:
-      # Single-author policy: no Co-Authored-By trailers on PR commits.
-      # Resolve the PR base ref robustly: the local Woodpecker backend leaves
-      # CI_COMMIT_PULL_REQUEST_BASE_BRANCH empty, which would collapse the
-      # range to HEAD (tip-only) and let an intermediate trailer slip through.
-      # Try the env var, then the known stacked base, then main; FAIL LOUD if
-      # none resolves, then walk every non-merge commit in the PR range.
-      # See .claude/rules/engineering.md — Single author per commit.
-      - >-
-        BASE="";
-        for CAND in "$${CI_COMMIT_PULL_REQUEST_BASE_BRANCH}" feat/web-app-platform-integration main; do
-          [ -n "$CAND" ] || continue;
-          if git fetch origin "$CAND" --depth=200 --quiet 2>/dev/null; then BASE="$(git rev-parse FETCH_HEAD)"; break; fi;
-        done;
-        if [ -z "$BASE" ]; then echo "ERROR single-author: cannot resolve the PR base branch to walk the commit range."; exit 1; fi;
-        MB="$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")";
-        BAD=0;
-        for SHA in $(git rev-list --no-merges "$MB..HEAD"); do
-          if git log -1 --format='%B' "$SHA" | grep -iqE '^Co-Authored-By:'; then
-            echo "ERROR $(git log -1 --oneline "$SHA") has a Co-Authored-By trailer (single-author policy: founder only).";
-            BAD=1;
-          fi;
-        done;
-        if [ "$BAD" -ne 0 ]; then echo "See .claude/rules/engineering.md — single author per commit."; exit 1; fi
+      - bash scripts/check-single-author.sh
+  - name: gates-tests
+    image: bash
+    when:
+      - event: pull_request
+    commands:
+      - bash scripts/ci-lib.test.sh
+      - bash scripts/check-single-author.test.sh
+      - bash scripts/check-spec-guard.test.sh
+      - bash scripts/check-ci-gates-integrity.test.sh
+  - name: spec-guard
+    image: bash
+    when:
+      - event: pull_request
+    commands:
+      - bash scripts/check-spec-guard.sh
+# <<< shared-ci-gates <<<
 
   - name: no-pii-in-logs
     image: bash
@@ -117,22 +107,6 @@ steps:
       # endorsements table; the endorsement-registry-auditor does the
       # deeper review. See docs/adr/0002.
       - bash scripts/check-endorsement-immutability.sh
-
-  - name: spec-guard
-    image: bash
-    commands:
-      # Heuristic: warn (do not block) if the diff introduces keywords
-      # from the research §5.4 cut list or attempts to swap a load-bearing
-      # decision. Real review happens via the spec-guardian subagent.
-      #
-      # NOTE: keep each line a single shell command. YAML `>-` folding
-      # preserves newlines on continuation lines, which bash will reject
-      # when the next character is `|`. Use single-line forms.
-      - 'BASE_REF="$${CI_COMMIT_PULL_REQUEST_BASE_BRANCH:-main}"'
-      - 'forbidden="native ios|native android|capacitor|web push|webpush|part 141|flight school management|fleet scheduling|8710|iacra|next.js|nextjs|gin-gonic|GORM"'
-      - git fetch origin "$BASE_REF" --quiet || true
-      - 'matches=$(git diff "origin/$BASE_REF"...HEAD -- ":(exclude)docs/**" | grep -E "^\+" | grep -Eni "$forbidden" || true)'
-      - 'if [ -n "$matches" ]; then echo "WARNING PR introduces deferred-scope or off-stack keywords. Confirm with spec-guardian."; echo "$matches"; fi'
 
   # ----------------------------------------------------------------------
   # Web — Node 20 + pnpm + lint + typecheck + test + build + audit
