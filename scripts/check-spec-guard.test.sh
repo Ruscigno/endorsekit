@@ -22,4 +22,20 @@ mkrepo; git checkout -q -b f; echo "const x = 1" > app.ts; git add app.ts; git c
 chk "clean diff: no warning, exit 0" "spec-guard: OK" "WARNING"; cleanup
 mkrepo; git checkout -q -b f; echo "import next.js stuff" > app.ts; git add app.ts; git commit -q -m bad
 chk "forbidden keyword warns (still exit 0)" "WARNING"; cleanup
+# a keyword that appears only in an added FILENAME (the `+++ b/<path>` diff
+# header) is not scope creep — must not warn
+mkrepo; git checkout -q -b f
+echo "notes about the removal" > gorm-removal-notes.txt
+git add gorm-removal-notes.txt; git commit -q -m notes
+chk "keyword only in a filename does not warn" "spec-guard: OK" "WARNING"; cleanup
+# editing the gate's own forbidden list must not self-trigger
+mkrepo; git checkout -q -b f
+printf 'next.js\nGORM\ngin-gonic\n' > scripts/spec-guard-forbidden.txt
+git add scripts/spec-guard-forbidden.txt; git commit -q -m "extend cut-list"
+chk "editing spec-guard-forbidden.txt does not self-trigger" "spec-guard: OK" "WARNING"; cleanup
+# docs/** is out of scope — a forbidden keyword in documentation must not warn
+mkrepo; git checkout -q -b f
+mkdir -p docs; echo "we deliberately rejected GORM and next.js" > docs/decisions.md
+git add docs; git commit -q -m docs
+chk "keyword inside docs/ does not warn (scope boundary)" "spec-guard: OK" "WARNING"; cleanup
 [ "$fail" -ne 0 ] && { echo "spec-guard tests: FAILED"; exit 1; }; echo "spec-guard tests: all passed"

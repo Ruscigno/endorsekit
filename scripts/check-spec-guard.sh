@@ -19,7 +19,9 @@ fi
 if [ ! -f "$FORBIDDEN_FILE" ]; then echo "spec-guard: OK (no forbidden list)"; exit 0; fi
 pattern="$(grep -vE '^[[:space:]]*(#|$)' "$FORBIDDEN_FILE" | paste -sd'|' -)"
 if [ -z "$pattern" ]; then echo "spec-guard: OK (empty forbidden list)"; exit 0; fi
-matches="$(git diff "origin/$base...HEAD" -- ':(exclude)docs/**' | grep -E '^\+' | grep -Eni "$pattern" || true)"
+# ^+[^+] skips the `+++ b/<path>` file headers (a keyword in a FILENAME is
+# not scope creep); the gate's own config is data, not a finding.
+matches="$(git diff "origin/$base...HEAD" -- ':(exclude)docs/**' ':(exclude)scripts/spec-guard-forbidden.txt' | grep -E '^\+[^+]' | grep -Eni "$pattern" || true)"
 if [ -n "$matches" ]; then
   echo "WARNING spec-guard: PR introduces deferred-scope or off-stack keywords. Confirm with spec-guardian."
   printf '%s\n' "$matches"
