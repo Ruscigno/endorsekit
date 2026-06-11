@@ -1,0 +1,16 @@
+# endorsekit §5.4 cut-list (one regex alternative per line; lifted verbatim
+# from the old inline spec-guard).
+native ios
+native android
+capacitor
+web push
+webpush
+part 141
+flight school management
+fleet scheduling
+8710
+iacra
+next.js
+nextjs
+gin-gonic
+GORM
