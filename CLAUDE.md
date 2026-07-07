@@ -1,3 +1,8 @@
+> ⏸️ **DEFERRED (2026-07) — DO NOT IMPLEMENT.**
+> This gear is paused under the portfolio's single-product focus (100% on Tail Number
+> Radar). Specs are complete; no implementation should begin here until the founder
+> reactivates it. See ADR-0009 / PROJECTS.md.
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
