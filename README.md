@@ -1,3 +1,9 @@
+> ⏸️ **DEFERRED — not under active development (2026-07).**
+> Specs (Phase 1–4) are complete, but implementation is paused: the portfolio is on a
+> **single-product focus**, concentrating 100% on **Tail Number Radar** (the sole active
+> product, hosted under the Aviation Cortex portal). This gear will be picked up once TNR
+> earns the right to expand. See `PROJECTS.md` and ADR-0009.
+
 # EndorseKit
 
 **The operating system for the independent flight instructor.** One
